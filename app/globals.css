@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 224 71% 4%;
+    --foreground: 213 31% 91%;
+    --card: 224 71% 6%;
+    --card-foreground: 213 31% 91%;
+    --popover: 224 71% 6%;
+    --popover-foreground: 213 31% 91%;
+    --primary: 263 70% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 222 47% 11%;
+    --secondary-foreground: 213 31% 91%;
+    --muted: 223 47% 11%;
+    --muted-foreground: 215 20% 45%;
+    --accent: 216 34% 17%;
+    --accent-foreground: 213 31% 91%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 213 31% 91%;
+    --border: 216 34% 17%;
+    --input: 216 34% 17%;
+    --ring: 263 70% 50%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* Prose styling for markdown content */
+.prose-dark {
+  color: hsl(var(--foreground));
+}
+
+.prose-dark h1,
+.prose-dark h2,
+.prose-dark h3,
+.prose-dark h4 {
+  color: hsl(var(--foreground));
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-dark h1 { font-size: 1.5rem; }
+.prose-dark h2 { font-size: 1.25rem; }
+.prose-dark h3 { font-size: 1.1rem; }
+
+.prose-dark p {
+  margin-bottom: 0.75rem;
+  line-height: 1.7;
+  color: hsl(var(--muted-foreground));
+}
+
+.prose-dark ul,
+.prose-dark ol {
+  margin-left: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.prose-dark li {
+  margin-bottom: 0.25rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.prose-dark strong {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+.prose-dark code {
+  background: hsl(var(--muted));
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+}
