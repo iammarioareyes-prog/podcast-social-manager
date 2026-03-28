@@ -18,7 +18,7 @@ interface MetricRow {
 }
 
 interface MetricsTableProps {
-  data: MetricRow[];
+  data?: MetricRow[];
   title?: string;
 }
 
