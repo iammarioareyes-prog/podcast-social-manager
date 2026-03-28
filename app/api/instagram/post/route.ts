@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 /**
  * POST /api/instagram/post
  * Create an Instagram Reel post

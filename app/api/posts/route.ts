@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/posts - Get all posts
 export async function GET(req: NextRequest) {
   try {

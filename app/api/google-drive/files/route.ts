@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listDriveFiles } from "@/lib/google-drive";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/google-drive/files
  * List files from Google Drive
