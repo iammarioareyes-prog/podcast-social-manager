@@ -1,14 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { Youtube, Instagram, Music2, Check, ExternalLink, AlertCircle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Youtube, Instagram, Music2, Check, ExternalLink, AlertCircle, RefreshCw } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+
+interface PlatformConnection {
+  platform: string;
+  is_connected: boolean;
+  platform_username?: string;
+}
 
 interface PlatformCardProps {
   name: string;
@@ -19,9 +23,8 @@ interface PlatformCardProps {
   username?: string;
   onConnect: () => void;
   onDisconnect: () => void;
-  authUrl?: string;
-  setupUrl?: string;
   setupDescription?: string;
+  setupUrl?: string;
 }
 
 function PlatformCard({
@@ -33,9 +36,8 @@ function PlatformCard({
   username,
   onConnect,
   onDisconnect,
-  authUrl,
-  setupUrl,
   setupDescription,
+  setupUrl,
 }: PlatformCardProps) {
   return (
     <Card className="bg-card border-border">
@@ -72,11 +74,7 @@ function PlatformCard({
                 </Button>
               </>
             ) : (
-              <Button
-                size="sm"
-                onClick={onConnect}
-                className="h-7 text-xs"
-              >
+              <Button size="sm" onClick={onConnect} className="h-7 text-xs">
                 Connect
               </Button>
             )}
@@ -88,12 +86,7 @@ function PlatformCard({
             <AlertCircle className="mt-0.5 h-3 w-3 flex-shrink-0 text-muted-foreground" />
             <p className="text-xs text-muted-foreground">{setupDescription}</p>
             {setupUrl && (
-              <a
-                href={setupUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-shrink-0"
-              >
+              <a href={setupUrl} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
                 <ExternalLink className="h-3 w-3 text-primary" />
               </a>
             )}
@@ -105,39 +98,53 @@ function PlatformCard({
 }
 
 export default function SettingsPage() {
-  const [connections, setConnections] = useState({
-    youtube: { isConnected: false, username: "" },
-    instagram: { isConnected: false, username: "" },
-    tiktok: { isConnected: false, username: "" },
-    googleDrive: { isConnected: false, username: "" },
-  });
+  const [connections, setConnections] = useState<Record<string, PlatformConnection>>({});
+  const [loading, setLoading] = useState(true);
 
-  const [apiKeys, setApiKeys] = useState({
-    anthropic: "",
-    supabaseUrl: "",
-    supabaseKey: "",
-  });
+  useEffect(() => {
+    loadConnections();
 
-  const handleConnect = (platform: keyof typeof connections) => {
-    // TODO: Redirect to OAuth flow
-    const authUrls: Record<string, string> = {
-      youtube: `/api/auth/youtube`,
-      instagram: `/api/auth/instagram`,
-      tiktok: `/api/auth/tiktok`,
-      googleDrive: `/api/auth/google-drive`,
-    };
+    // Show success/error toast based on URL params
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("success")) {
+      const msg = params.get("success")?.replace("_", " ") || "Connected!";
+      console.log("Success:", msg);
+    }
+  }, []);
 
-    alert(
-      `TODO: Redirect to ${authUrls[platform]} OAuth flow.\n\nMake sure you've configured the environment variables in .env.local`
-    );
-  };
+  async function loadConnections() {
+    try {
+      const res = await fetch("/api/platform-connections");
+      if (res.ok) {
+        const data = await res.json();
+        const map: Record<string, PlatformConnection> = {};
+        for (const c of data) {
+          map[c.platform] = c;
+        }
+        setConnections(map);
+      }
+    } catch (err) {
+      console.error("Failed to load connections:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const handleDisconnect = (platform: keyof typeof connections) => {
-    setConnections((prev) => ({
-      ...prev,
-      [platform]: { isConnected: false, username: "" },
-    }));
-  };
+  function handleConnect(authPath: string) {
+    window.location.href = authPath;
+  }
+
+  async function handleDisconnect(platform: string) {
+    await fetch("/api/platform-connections", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform, is_connected: false }),
+    });
+    loadConnections();
+  }
+
+  const isConnected = (platform: string) => connections[platform]?.is_connected === true;
+  const getUsername = (platform: string) => connections[platform]?.platform_username;
 
   return (
     <div className="flex flex-col">
@@ -146,9 +153,13 @@ export default function SettingsPage() {
       <div className="flex-1 space-y-6 p-6">
         {/* Platform Connections */}
         <div>
-          <h2 className="mb-1 text-sm font-semibold text-foreground">
-            Platform Connections
-          </h2>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-semibold text-foreground">Platform Connections</h2>
+            <Button variant="ghost" size="sm" className="h-6 gap-1 text-xs" onClick={loadConnections}>
+              <RefreshCw className="h-3 w-3" />
+              Refresh
+            </Button>
+          </div>
           <p className="mb-4 text-xs text-muted-foreground">
             Connect your social media accounts to publish and analyze content
           </p>
@@ -159,12 +170,11 @@ export default function SettingsPage() {
               icon={Youtube}
               color="text-red-500"
               bgColor="bg-red-500/10"
-              isConnected={connections.youtube.isConnected}
-              username={connections.youtube.username}
-              onConnect={() => handleConnect("youtube")}
+              isConnected={isConnected("youtube")}
+              username={getUsername("youtube")}
+              onConnect={() => handleConnect("/api/auth/youtube")}
               onDisconnect={() => handleDisconnect("youtube")}
-              setupDescription="Requires Google OAuth 2.0 with YouTube Data API v3 and YouTube Analytics API access. Configure YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET in your environment."
-              setupUrl="https://console.cloud.google.com/apis/credentials"
+              setupDescription="Connects via Google OAuth 2.0 with YouTube Data API v3 access."
             />
 
             <PlatformCard
@@ -172,11 +182,11 @@ export default function SettingsPage() {
               icon={Instagram}
               color="text-pink-500"
               bgColor="bg-pink-500/10"
-              isConnected={connections.instagram.isConnected}
-              username={connections.instagram.username}
-              onConnect={() => handleConnect("instagram")}
+              isConnected={isConnected("instagram")}
+              username={getUsername("instagram")}
+              onConnect={() => handleConnect("/api/auth/instagram")}
               onDisconnect={() => handleDisconnect("instagram")}
-              setupDescription="Requires Facebook Developer App with Instagram Graph API. Your account must be a Business or Creator account. Configure INSTAGRAM_APP_ID and INSTAGRAM_APP_SECRET."
+              setupDescription="Requires Facebook Developer App with Instagram Graph API. Your account must be a Business or Creator account."
               setupUrl="https://developers.facebook.com/apps"
             />
 
@@ -185,11 +195,11 @@ export default function SettingsPage() {
               icon={Music2}
               color="text-cyan-400"
               bgColor="bg-cyan-400/10"
-              isConnected={connections.tiktok.isConnected}
-              username={connections.tiktok.username}
-              onConnect={() => handleConnect("tiktok")}
+              isConnected={isConnected("tiktok")}
+              username={getUsername("tiktok")}
+              onConnect={() => handleConnect("/api/auth/tiktok")}
               onDisconnect={() => handleDisconnect("tiktok")}
-              setupDescription="Requires TikTok Developer App with Content Posting API access. Configure TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET."
+              setupDescription="Requires TikTok Developer App with Content Posting API access."
               setupUrl="https://developers.tiktok.com"
             />
           </div>
@@ -199,9 +209,7 @@ export default function SettingsPage() {
 
         {/* Google Drive */}
         <div>
-          <h2 className="mb-1 text-sm font-semibold text-foreground">
-            Storage & Content Sources
-          </h2>
+          <h2 className="mb-1 text-sm font-semibold text-foreground">Storage & Content Sources</h2>
           <p className="mb-4 text-xs text-muted-foreground">
             Connect storage services to browse and use your content
           </p>
@@ -215,12 +223,11 @@ export default function SettingsPage() {
             )}
             color="text-green-500"
             bgColor="bg-green-500/10"
-            isConnected={connections.googleDrive.isConnected}
-            username={connections.googleDrive.username}
-            onConnect={() => handleConnect("googleDrive")}
-            onDisconnect={() => handleDisconnect("googleDrive")}
-            setupDescription="Connect Google Drive to browse your podcast episodes and Opus Clips exports. Configure GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_CLIENT_SECRET."
-            setupUrl="https://console.cloud.google.com/apis/credentials"
+            isConnected={isConnected("google_drive")}
+            username={getUsername("google_drive")}
+            onConnect={() => handleConnect("/api/auth/google-drive")}
+            onDisconnect={() => handleDisconnect("google_drive")}
+            setupDescription="Connect Google Drive to browse your podcast episodes and Opus Clips exports."
           />
         </div>
 
@@ -228,35 +235,37 @@ export default function SettingsPage() {
 
         {/* API Configuration */}
         <div>
-          <h2 className="mb-1 text-sm font-semibold text-foreground">
-            API Configuration
-          </h2>
+          <h2 className="mb-1 text-sm font-semibold text-foreground">API Configuration</h2>
           <p className="mb-4 text-xs text-muted-foreground">
-            These values should be set in your .env.local file (never hardcode in UI)
+            Environment variables configured in Vercel project settings.
           </p>
 
           <Card className="bg-card border-border">
             <CardHeader>
-              <CardTitle className="text-sm">Environment Variables</CardTitle>
+              <CardTitle className="text-sm">Required Environment Variables</CardTitle>
               <CardDescription className="text-xs">
-                Copy these to your .env.local file. See .env.example for all required variables.
+                These must be set in Vercel (or .env.local for local dev).
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="rounded-lg bg-background/60 p-4 font-mono text-xs text-muted-foreground">
-                <p className="mb-1 text-green-400"># .env.local</p>
-                <p>ANTHROPIC_API_KEY=your_key_here</p>
-                <p>NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co</p>
-                <p>NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key</p>
-                <p>SUPABASE_SERVICE_ROLE_KEY=your_service_key</p>
-                <p>YOUTUBE_CLIENT_ID=your_client_id</p>
-                <p>YOUTUBE_CLIENT_SECRET=your_secret</p>
-                <p>INSTAGRAM_APP_ID=your_app_id</p>
-                <p>INSTAGRAM_APP_SECRET=your_secret</p>
-                <p>TIKTOK_CLIENT_KEY=your_key</p>
-                <p>TIKTOK_CLIENT_SECRET=your_secret</p>
-                <p>GOOGLE_DRIVE_CLIENT_ID=your_id</p>
-                <p>GOOGLE_DRIVE_CLIENT_SECRET=your_secret</p>
+              <div className="rounded-lg bg-background/60 p-4 font-mono text-xs text-muted-foreground space-y-0.5">
+                <p className="text-green-400"># Supabase</p>
+                <p>NEXT_PUBLIC_SUPABASE_URL</p>
+                <p>NEXT_PUBLIC_SUPABASE_ANON_KEY</p>
+                <p>SUPABASE_SERVICE_ROLE_KEY</p>
+                <p className="mt-2 text-green-400"># AI</p>
+                <p>ANTHROPIC_API_KEY</p>
+                <p className="mt-2 text-green-400"># YouTube / Google OAuth</p>
+                <p>YOUTUBE_CLIENT_ID</p>
+                <p>YOUTUBE_CLIENT_SECRET</p>
+                <p>YOUTUBE_REDIRECT_URI</p>
+                <p className="mt-2 text-green-400"># Google Drive OAuth</p>
+                <p>GOOGLE_DRIVE_CLIENT_ID</p>
+                <p>GOOGLE_DRIVE_CLIENT_SECRET</p>
+                <p>GOOGLE_DRIVE_REDIRECT_URI</p>
+                <p>GOOGLE_DRIVE_FOLDER_ID</p>
+                <p className="mt-2 text-green-400"># App</p>
+                <p>NEXT_PUBLIC_APP_URL</p>
               </div>
             </CardContent>
           </Card>
@@ -266,9 +275,7 @@ export default function SettingsPage() {
 
         {/* Database Setup */}
         <div>
-          <h2 className="mb-1 text-sm font-semibold text-foreground">
-            Database Setup
-          </h2>
+          <h2 className="mb-1 text-sm font-semibold text-foreground">Database Setup</h2>
           <p className="mb-4 text-xs text-muted-foreground">
             Run this SQL in your Supabase SQL Editor to create the required tables
           </p>
@@ -276,9 +283,7 @@ export default function SettingsPage() {
           <Card className="bg-card border-border">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-medium text-foreground">
-                  supabase/migrations/schema.sql
-                </p>
+                <p className="text-xs font-medium text-foreground">supabase/migrations/schema.sql</p>
                 <Button
                   variant="outline"
                   size="sm"
@@ -289,13 +294,9 @@ export default function SettingsPage() {
                   Open Supabase
                 </Button>
               </div>
-              <div className="rounded bg-background/60 p-3 font-mono text-xs text-muted-foreground max-h-48 overflow-y-auto">
-                <p className="text-green-400">-- Run in Supabase SQL Editor</p>
-                <p>-- See supabase/migrations/schema.sql for full schema</p>
-                <p className="mt-2">create table posts (...);</p>
-                <p>create table analytics (...);</p>
-                <p>create table platform_connections (...);</p>
-                <p>create table content_items (...);</p>
+              <div className="rounded bg-background/60 p-3 font-mono text-xs text-muted-foreground">
+                <p className="text-green-400">-- Schema already applied ✓</p>
+                <p>posts · analytics · platform_connections · content_items</p>
               </div>
             </CardContent>
           </Card>
