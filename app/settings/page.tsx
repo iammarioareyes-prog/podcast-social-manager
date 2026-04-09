@@ -1,12 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Youtube, Instagram, Music2, Check, ExternalLink, AlertCircle, RefreshCw } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Youtube, Instagram, Music2, Check, ExternalLink, AlertCircle, RefreshCw, Upload } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+
+interface VoiceProfile {
+  id?: string;
+  voice_summary?: string;
+  voice_examples?: string[];
+  ig_tags?: string[];
+  tiktok_tags?: string[];
+  youtube_tags?: string[];
+  ig_hashtags?: string[];
+  tiktok_hashtags?: string[];
+  youtube_hashtags?: string[];
+  podcast_name?: string;
+  podcast_description?: string;
+}
 
 interface PlatformConnection {
   platform: string;
@@ -101,8 +117,27 @@ export default function SettingsPage() {
   const [connections, setConnections] = useState<Record<string, PlatformConnection>>({});
   const [loading, setLoading] = useState(true);
 
+  // Voice Profile state
+  const [voiceProfile, setVoiceProfile] = useState<VoiceProfile>({});
+  const [voiceLoading, setVoiceLoading] = useState(true);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Instagram tags editing state
+  const [igTagsInput, setIgTagsInput] = useState("");
+  const [igTagsSaving, setIgTagsSaving] = useState(false);
+
+  // Hashtags editing state
+  const [igHashtagsInput, setIgHashtagsInput] = useState("");
+  const [tiktokHashtagsInput, setTiktokHashtagsInput] = useState("");
+  const [youtubeHashtagsInput, setYoutubeHashtagsInput] = useState("");
+  const [hashtagsSaving, setHashtagsSaving] = useState(false);
+
   useEffect(() => {
     loadConnections();
+    loadVoiceProfile();
 
     // Show success/error toast based on URL params
     const params = new URLSearchParams(window.location.search);
@@ -127,6 +162,114 @@ export default function SettingsPage() {
       console.error("Failed to load connections:", err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadVoiceProfile() {
+    try {
+      const res = await fetch("/api/voice-profile");
+      if (res.ok) {
+        const data: VoiceProfile = await res.json();
+        setVoiceProfile(data);
+        const tags = data.ig_tags || [];
+        setIgTagsInput(tags.map((t) => `@${t.replace("@", "")}`).join(" "));
+        setIgHashtagsInput((data.ig_hashtags || []).join(", "));
+        setTiktokHashtagsInput((data.tiktok_hashtags || []).join(", "));
+        setYoutubeHashtagsInput((data.youtube_hashtags || []).join(", "));
+      }
+    } catch (err) {
+      console.error("Failed to load voice profile:", err);
+    } finally {
+      setVoiceLoading(false);
+    }
+  }
+
+  async function handleChatGPTImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportLoading(true);
+    setImportSuccess(null);
+    setImportError(null);
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      // ChatGPT exports can be a single array or an object
+      const conversations = Array.isArray(parsed) ? parsed : [parsed];
+
+      const res = await fetch("/api/voice-profile/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversations }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setImportError(data.error || "Import failed");
+      } else {
+        setImportSuccess(
+          `Analyzed ${data.messagesAnalyzed} messages and found ${data.examplesFound} caption examples.`
+        );
+        await loadVoiceProfile();
+      }
+    } catch (err: any) {
+      setImportError(err.message || "Failed to parse file");
+    } finally {
+      setImportLoading(false);
+      // Reset file input so the same file can be re-imported
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function saveIgTags() {
+    setIgTagsSaving(true);
+    try {
+      const tags = igTagsInput
+        .split(/\s+/)
+        .map((t) => t.replace(/^@/, "").trim())
+        .filter(Boolean);
+
+      const res = await fetch("/api/voice-profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ig_tags: tags }),
+      });
+      if (res.ok) {
+        await loadVoiceProfile();
+      }
+    } catch (err) {
+      console.error("Failed to save IG tags:", err);
+    } finally {
+      setIgTagsSaving(false);
+    }
+  }
+
+  async function saveHashtags() {
+    setHashtagsSaving(true);
+    try {
+      const parseHashtags = (val: string) =>
+        val
+          .split(",")
+          .map((h) => h.trim())
+          .filter(Boolean);
+
+      const res = await fetch("/api/voice-profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ig_hashtags: parseHashtags(igHashtagsInput),
+          tiktok_hashtags: parseHashtags(tiktokHashtagsInput),
+          youtube_hashtags: parseHashtags(youtubeHashtagsInput),
+        }),
+      });
+      if (res.ok) {
+        await loadVoiceProfile();
+      }
+    } catch (err) {
+      console.error("Failed to save hashtags:", err);
+    } finally {
+      setHashtagsSaving(false);
     }
   }
 
@@ -229,6 +372,159 @@ export default function SettingsPage() {
             onDisconnect={() => handleDisconnect("google_drive")}
             setupDescription="Connect Google Drive to browse your podcast episodes and Opus Clips exports."
           />
+        </div>
+
+        <Separator />
+
+        {/* Voice Profile & Caption Settings */}
+        <div>
+          <h2 className="mb-1 text-sm font-semibold text-foreground">Voice Profile & Caption Settings</h2>
+          <p className="mb-4 text-xs text-muted-foreground">
+            Customize your writing voice and auto-tagging defaults for caption generation
+          </p>
+
+          <div className="space-y-4">
+            {/* Voice Profile Card */}
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Voice Profile</CardTitle>
+                <CardDescription className="text-xs">
+                  Import your ChatGPT conversations to train the caption generator on your writing style
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!voiceLoading && voiceProfile.voice_summary && (
+                  <div className="rounded-lg bg-muted/40 p-3">
+                    <p className="mb-1 text-xs font-medium text-foreground">Current Voice Summary</p>
+                    <p className="text-xs text-muted-foreground">{voiceProfile.voice_summary}</p>
+                  </div>
+                )}
+
+                <div>
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Export your conversations from ChatGPT (Settings → Data Controls → Export) and import
+                    the <span className="font-medium text-foreground">conversations.json</span> file.
+                  </p>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".json"
+                      className="hidden"
+                      onChange={handleChatGPTImport}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-2 text-xs"
+                      disabled={importLoading}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Upload className="h-3 w-3" />
+                      {importLoading ? "Analyzing..." : "Import ChatGPT conversations"}
+                    </Button>
+                  </div>
+
+                  {importSuccess && (
+                    <div className="mt-3 flex items-center gap-2 rounded-lg bg-green-500/10 px-3 py-2">
+                      <Check className="h-3 w-3 text-green-400" />
+                      <p className="text-xs text-green-400">{importSuccess}</p>
+                    </div>
+                  )}
+
+                  {importError && (
+                    <div className="mt-3 flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2">
+                      <AlertCircle className="h-3 w-3 text-destructive" />
+                      <p className="text-xs text-destructive">{importError}</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Instagram Auto-Tags Card */}
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Instagram Auto-Tags</CardTitle>
+                <CardDescription className="text-xs">
+                  These accounts are automatically tagged at the end of every Instagram caption
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Textarea
+                  value={igTagsInput}
+                  onChange={(e) => setIgTagsInput(e.target.value)}
+                  placeholder="@handle1 @handle2 @handle3"
+                  className="min-h-[64px] resize-none font-mono text-xs"
+                  rows={2}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Space-separated handles with @ prefix (e.g. @iammarioareyes @tamishaharris)
+                </p>
+                <Button
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={igTagsSaving}
+                  onClick={saveIgTags}
+                >
+                  {igTagsSaving ? "Saving..." : "Save Tags"}
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Hashtags Card */}
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Hashtags</CardTitle>
+                <CardDescription className="text-xs">
+                  Preferred hashtags for each platform — the AI will pull from these when generating captions
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-foreground">Instagram</label>
+                  <Input
+                    value={igHashtagsInput}
+                    onChange={(e) => setIgHashtagsInput(e.target.value)}
+                    placeholder="#podcast, #blackpodcast, #motivation"
+                    className="h-8 font-mono text-xs"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-foreground">TikTok</label>
+                  <Input
+                    value={tiktokHashtagsInput}
+                    onChange={(e) => setTiktokHashtagsInput(e.target.value)}
+                    placeholder="#podcast, #podcastclips, #fyp"
+                    className="h-8 font-mono text-xs"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-foreground">YouTube</label>
+                  <Input
+                    value={youtubeHashtagsInput}
+                    onChange={(e) => setYoutubeHashtagsInput(e.target.value)}
+                    placeholder="#shorts, #podcast, #interview"
+                    className="h-8 font-mono text-xs"
+                  />
+                </div>
+
+                <p className="text-xs text-muted-foreground">Comma-separated hashtags (with or without #)</p>
+
+                <Button
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={hashtagsSaving}
+                  onClick={saveHashtags}
+                >
+                  {hashtagsSaving ? "Saving..." : "Save Hashtags"}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         <Separator />
