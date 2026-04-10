@@ -193,18 +193,37 @@ export default function SettingsPage() {
     setImportError(null);
 
     try {
-      let allConversations: any[] = [];
+      // Extract only user message text client-side to stay under Vercel's 4.5MB body limit
+      const extractedMessages: string[] = [];
       for (const file of fileList) {
         const text = await file.text();
         const parsed = JSON.parse(text);
-        const convs = Array.isArray(parsed) ? parsed : [parsed];
-        allConversations = allConversations.concat(convs);
+        const convs: any[] = Array.isArray(parsed) ? parsed : [parsed];
+        for (const conv of convs.slice(0, 200)) {
+          const mapping = conv.mapping || {};
+          for (const node of Object.values(mapping) as any[]) {
+            if (
+              node?.message?.author?.role === "user" &&
+              node?.message?.content?.parts
+            ) {
+              const msg = node.message.content.parts.join(" ").trim();
+              if (msg.length > 20 && msg.length < 1000) {
+                extractedMessages.push(msg);
+              }
+            }
+          }
+        }
+      }
+
+      if (extractedMessages.length === 0) {
+        setImportError("No usable messages found in the selected files.");
+        return;
       }
 
       const res = await fetch("/api/voice-profile/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversations: allConversations }),
+        body: JSON.stringify({ messages: extractedMessages.slice(0, 300) }),
       });
 
       const data = await res.json();

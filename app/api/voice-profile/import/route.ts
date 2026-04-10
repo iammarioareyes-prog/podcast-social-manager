@@ -12,28 +12,36 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { conversations } = body; // Array of ChatGPT conversation objects
+    // Accept pre-extracted messages (preferred) or raw conversations fallback
+    const { messages, conversations } = body;
 
-    if (!conversations || !Array.isArray(conversations)) {
-      return NextResponse.json({ error: "Invalid conversations data" }, { status: 400 });
-    }
+    let userMessages: string[] = [];
 
-    // Extract user messages that look like captions/social media content
-    const userMessages: string[] = [];
-    for (const conv of conversations.slice(0, 100)) {
-      // Limit to 100 conversations
-      const mapping = conv.mapping || {};
-      for (const node of Object.values(mapping) as any[]) {
-        if (
-          node?.message?.author?.role === "user" &&
-          node?.message?.content?.parts
-        ) {
-          const text = node.message.content.parts.join(" ").trim();
-          if (text.length > 20 && text.length < 1000) {
-            userMessages.push(text);
+    if (messages && Array.isArray(messages)) {
+      // Client already extracted the messages — use directly
+      userMessages = messages.filter((m: any) => typeof m === "string" && m.trim().length > 0);
+    } else if (conversations && Array.isArray(conversations)) {
+      // Fallback: extract from raw conversations (may hit size limits)
+      for (const conv of conversations.slice(0, 100)) {
+        const mapping = conv.mapping || {};
+        for (const node of Object.values(mapping) as any[]) {
+          if (
+            node?.message?.author?.role === "user" &&
+            node?.message?.content?.parts
+          ) {
+            const text = node.message.content.parts.join(" ").trim();
+            if (text.length > 20 && text.length < 1000) {
+              userMessages.push(text);
+            }
           }
         }
       }
+    } else {
+      return NextResponse.json({ error: "Invalid request: provide messages or conversations" }, { status: 400 });
+    }
+
+    if (userMessages.length === 0) {
+      return NextResponse.json({ error: "No messages found to analyze" }, { status: 400 });
     }
 
     // Use Claude to extract voice characteristics and example captions
@@ -115,7 +123,7 @@ Only return valid JSON.`,
       success: true,
       messagesAnalyzed: userMessages.length,
       voiceSummary: voiceData.voice_summary,
-      examplesFound: voiceData.example_captions?.length || 0,
+      examplesFound: (voiceData.example_captions || []).length,
     });
   } catch (err: any) {
     console.error("Import error:", err);
