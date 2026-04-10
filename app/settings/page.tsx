@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Youtube, Instagram, Music2, Check, ExternalLink, AlertCircle, RefreshCw, Upload } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -123,6 +123,8 @@ export default function SettingsPage() {
   const [importLoading, setImportLoading] = useState(false);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Instagram tags editing state
@@ -184,19 +186,16 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleChatGPTImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
+  async function processFiles(fileList: File[]) {
+    if (fileList.length === 0) return;
     setImportLoading(true);
     setImportSuccess(null);
     setImportError(null);
 
     try {
-      // Merge all conversations from all files into one array
       let allConversations: any[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const text = await files[i].text();
+      for (const file of fileList) {
+        const text = await file.text();
         const parsed = JSON.parse(text);
         const convs = Array.isArray(parsed) ? parsed : [parsed];
         allConversations = allConversations.concat(convs);
@@ -213,8 +212,9 @@ export default function SettingsPage() {
         setImportError(data.error || "Import failed");
       } else {
         setImportSuccess(
-          `Analyzed ${data.messagesAnalyzed} messages across ${files.length} file${files.length > 1 ? "s" : ""} and found ${data.examplesFound} caption examples.`
+          `Analyzed ${data.messagesAnalyzed} messages across ${fileList.length} file${fileList.length > 1 ? "s" : ""} — found ${data.examplesFound} caption examples.`
         );
+        setQueuedFiles([]);
         await loadVoiceProfile();
       }
     } catch (err: any) {
@@ -224,6 +224,40 @@ export default function SettingsPage() {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
+
+  async function handleChatGPTImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const newFiles = Array.from(files);
+    const merged = [...queuedFiles, ...newFiles].filter(
+      (f, i, arr) => arr.findIndex((x) => x.name === f.name) === i
+    );
+    setQueuedFiles(merged);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const dropped = Array.from(e.dataTransfer.files).filter((f) => f.name.endsWith(".json"));
+    if (dropped.length === 0) return;
+    setQueuedFiles((prev) => {
+      const merged = [...prev, ...dropped].filter(
+        (f, i, arr) => arr.findIndex((x) => x.name === f.name) === i
+      );
+      return merged;
+    });
+  }, []);
 
   async function saveIgTags() {
     setIgTagsSaving(true);
@@ -405,30 +439,60 @@ export default function SettingsPage() {
 
                 <div>
                   <p className="mb-2 text-xs text-muted-foreground">
-                    Export your conversations from ChatGPT (Settings → Data Controls → Export) and import
-                    all <span className="font-medium text-foreground">conversations.json</span> files. You can select multiple files at once.
+                    Export from ChatGPT (Settings → Data Controls → Export). Then <strong className="text-foreground">drag all 10 files</strong> onto the zone below, or click to add them one at a time.
                   </p>
 
-                  <div className="flex items-center gap-3">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".json"
-                      multiple
-                      className="hidden"
-                      onChange={handleChatGPTImport}
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 gap-2 text-xs"
-                      disabled={importLoading}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Upload className="h-3 w-3" />
-                      {importLoading ? "Analyzing..." : "Import conversations.json files"}
-                    </Button>
+                  {/* Drop zone */}
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={cn(
+                      "cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition-colors",
+                      isDragging
+                        ? "border-primary bg-primary/10"
+                        : "border-border hover:border-primary/50 hover:bg-muted/20"
+                    )}
+                  >
+                    <Upload className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+                    <p className="text-xs font-medium text-foreground">
+                      Drag & drop all conversations.json files here
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">or click to browse</p>
                   </div>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json"
+                    multiple
+                    className="hidden"
+                    onChange={handleChatGPTImport}
+                  />
+
+                  {/* Queued files list */}
+                  {queuedFiles.length > 0 && (
+                    <div className="mt-3 rounded-lg bg-muted/30 p-3">
+                      <p className="mb-2 text-xs font-medium text-foreground">{queuedFiles.length} file{queuedFiles.length > 1 ? "s" : ""} queued:</p>
+                      <ul className="space-y-0.5">
+                        {queuedFiles.map((f) => (
+                          <li key={f.name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Check className="h-3 w-3 text-green-400" />
+                            {f.name}
+                          </li>
+                        ))}
+                      </ul>
+                      <Button
+                        size="sm"
+                        className="mt-3 h-7 w-full text-xs"
+                        disabled={importLoading}
+                        onClick={(e) => { e.stopPropagation(); processFiles(queuedFiles); }}
+                      >
+                        {importLoading ? "Analyzing..." : `Analyze ${queuedFiles.length} file${queuedFiles.length > 1 ? "s" : ""} →`}
+                      </Button>
+                    </div>
+                  )}
 
                   {importSuccess && (
                     <div className="mt-3 flex items-center gap-2 rounded-lg bg-green-500/10 px-3 py-2">
