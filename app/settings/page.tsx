@@ -185,23 +185,27 @@ export default function SettingsPage() {
   }
 
   async function handleChatGPTImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setImportLoading(true);
     setImportSuccess(null);
     setImportError(null);
 
     try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
-      // ChatGPT exports can be a single array or an object
-      const conversations = Array.isArray(parsed) ? parsed : [parsed];
+      // Merge all conversations from all files into one array
+      let allConversations: any[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const text = await files[i].text();
+        const parsed = JSON.parse(text);
+        const convs = Array.isArray(parsed) ? parsed : [parsed];
+        allConversations = allConversations.concat(convs);
+      }
 
       const res = await fetch("/api/voice-profile/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversations }),
+        body: JSON.stringify({ conversations: allConversations }),
       });
 
       const data = await res.json();
@@ -209,7 +213,7 @@ export default function SettingsPage() {
         setImportError(data.error || "Import failed");
       } else {
         setImportSuccess(
-          `Analyzed ${data.messagesAnalyzed} messages and found ${data.examplesFound} caption examples.`
+          `Analyzed ${data.messagesAnalyzed} messages across ${files.length} file${files.length > 1 ? "s" : ""} and found ${data.examplesFound} caption examples.`
         );
         await loadVoiceProfile();
       }
@@ -217,7 +221,6 @@ export default function SettingsPage() {
       setImportError(err.message || "Failed to parse file");
     } finally {
       setImportLoading(false);
-      // Reset file input so the same file can be re-imported
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -403,7 +406,7 @@ export default function SettingsPage() {
                 <div>
                   <p className="mb-2 text-xs text-muted-foreground">
                     Export your conversations from ChatGPT (Settings → Data Controls → Export) and import
-                    the <span className="font-medium text-foreground">conversations.json</span> file.
+                    all <span className="font-medium text-foreground">conversations.json</span> files. You can select multiple files at once.
                   </p>
 
                   <div className="flex items-center gap-3">
@@ -411,6 +414,7 @@ export default function SettingsPage() {
                       ref={fileInputRef}
                       type="file"
                       accept=".json"
+                      multiple
                       className="hidden"
                       onChange={handleChatGPTImport}
                     />
@@ -422,7 +426,7 @@ export default function SettingsPage() {
                       onClick={() => fileInputRef.current?.click()}
                     >
                       <Upload className="h-3 w-3" />
-                      {importLoading ? "Analyzing..." : "Import ChatGPT conversations"}
+                      {importLoading ? "Analyzing..." : "Import conversations.json files"}
                     </Button>
                   </div>
 
