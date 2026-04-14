@@ -27,13 +27,15 @@ interface BreadcrumbEntry {
   name: string;
 }
 
-async function fetchDriveItems(folderId?: string): Promise<DriveFile[]> {
+type FetchResult = { files: DriveFile[]; errorCode?: string };
+
+async function fetchDriveItems(folderId?: string): Promise<FetchResult> {
   const params = new URLSearchParams({ pageSize: "100" });
   if (folderId) params.set("folderId", folderId);
   const res = await fetch(`/api/google-drive/files?${params.toString()}`);
-  if (!res.ok) return [];
   const data = await res.json();
-  return data.files ?? [];
+  if (!res.ok) return { files: [], errorCode: data.error ?? "unknown" };
+  return { files: data.files ?? [] };
 }
 
 export default function ContentPage() {
@@ -42,16 +44,19 @@ export default function ContentPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [allItems, setAllItems] = useState<DriveFile[]>([]);
+  const [driveError, setDriveError] = useState<string | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbEntry[]>([
-    { id: null, name: "All Episodes" },
+    { id: null, name: "My Drive" },
   ]);
 
   const currentFolderId = breadcrumb[breadcrumb.length - 1].id;
 
   const loadFolder = useCallback(async (folderId?: string) => {
     setIsLoading(true);
-    const items = await fetchDriveItems(folderId ?? undefined);
-    setAllItems(items);
+    setDriveError(null);
+    const result = await fetchDriveItems(folderId ?? undefined);
+    if (result.errorCode) setDriveError(result.errorCode);
+    setAllItems(result.files);
     setIsLoading(false);
   }, []);
 
@@ -222,16 +227,47 @@ export default function ContentPage() {
           </div>
         )}
 
-        {/* Empty state when no folders and no files */}
+        {/* Empty / error state */}
         {!isLoading && folders.length === 0 && files.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <FolderOpen className="mb-4 h-12 w-12 text-muted-foreground/30" />
-            <p className="text-sm font-medium text-muted-foreground">
-              {isAtRoot ? "No files found in your Google Drive folder" : "This folder is empty"}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground/60">
-              Make sure Google Drive is connected and GOOGLE_DRIVE_FOLDER_ID is set correctly
-            </p>
+            {driveError === "not_connected" ? (
+              <>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Google Drive is not connected
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground/60">
+                  Go to{" "}
+                  <a href="/settings" className="underline hover:text-foreground">
+                    Settings
+                  </a>{" "}
+                  and connect Google Drive to browse your clips
+                </p>
+              </>
+            ) : driveError ? (
+              <>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Could not load Google Drive files
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground/60">
+                  Error: {driveError} — try reconnecting Google Drive in{" "}
+                  <a href="/settings" className="underline hover:text-foreground">
+                    Settings
+                  </a>
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-muted-foreground">
+                  {isAtRoot ? "No files found in your Google Drive" : "This folder is empty"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground/60">
+                  {isAtRoot
+                    ? "Upload clips to Google Drive and they will appear here"
+                    : "Go back and open a different folder"}
+                </p>
+              </>
+            )}
             <Button variant="outline" size="sm" className="mt-4" onClick={handleRefresh}>
               <RefreshCw className="mr-2 h-3.5 w-3.5" />
               Retry

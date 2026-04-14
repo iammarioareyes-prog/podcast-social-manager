@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
 
     if (!connection?.is_connected || !connection?.access_token) {
       return NextResponse.json(
-        { error: "Google Drive not connected", files: [] },
+        { error: "not_connected", message: "Google Drive not connected", files: [] },
         { status: 401 }
       );
     }

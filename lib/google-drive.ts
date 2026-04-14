@@ -64,10 +64,9 @@ export async function listDriveFiles(params: DriveListParams): Promise<{
   // Build the query string
   const queryParts: string[] = ["trashed = false"];
 
-  const targetFolder = folderId || process.env.GOOGLE_DRIVE_FOLDER_ID;
-  if (targetFolder) {
-    queryParts.push(`'${targetFolder}' in parents`);
-  }
+  // Use explicit folderId > env var > 'root' (My Drive top level)
+  const targetFolder = folderId || process.env.GOOGLE_DRIVE_FOLDER_ID || "root";
+  queryParts.push(`'${targetFolder}' in parents`);
 
   if (mimeType) {
     queryParts.push(`mimeType contains '${mimeType}'`);
