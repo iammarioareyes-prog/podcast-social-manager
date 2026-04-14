@@ -1,78 +1,123 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
-/**
- * POST /api/instagram/post
- * Create an Instagram Reel post
- * TODO: Implement with Instagram Graph API
- */
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+const GRAPH = "https://graph.facebook.com/v19.0";
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { postId, caption, videoUrl, coverUrl } = body;
+    const { postId, caption, videoUrl, coverUrl } = await req.json();
 
-    if (!postId || !caption) {
-      return NextResponse.json(
-        { error: "postId and caption are required" },
-        { status: 400 }
-      );
+    if (!caption || !videoUrl) {
+      return NextResponse.json({ error: "caption and videoUrl are required" }, { status: 400 });
     }
 
-    // TODO: Get access token from platform_connections
-    const supabase = createServerSupabaseClient();
-    const { data: connection } = await supabase
+    const { data: conn } = await supabase
       .from("platform_connections")
-      .select("access_token, platform_user_id")
+      .select("access_token, platform_user_id, metadata")
       .eq("platform", "instagram")
       .eq("is_connected", true)
       .single();
 
-    if (!connection) {
+    if (!conn?.access_token) {
+      return NextResponse.json({ error: "Instagram not connected" }, { status: 401 });
+    }
+
+    const igId = conn.metadata?.instagram_account_id || conn.platform_user_id;
+    if (!igId) {
+      return NextResponse.json({ error: "Instagram account ID not found in connection" }, { status: 400 });
+    }
+
+    const token = conn.access_token;
+
+    // Step 1: Create media container
+    const containerParams = new URLSearchParams({
+      media_type: "REELS",
+      video_url: videoUrl,
+      caption,
+      access_token: token,
+    });
+    if (coverUrl) containerParams.set("cover_url", coverUrl);
+
+    const containerRes = await fetch(`${GRAPH}/${igId}/media`, {
+      method: "POST",
+      body: containerParams,
+    });
+    const containerData = await containerRes.json();
+
+    if (!containerRes.ok || containerData.error) {
+      console.error("Instagram container error:", containerData);
       return NextResponse.json(
-        { error: "Instagram is not connected. Please connect in Settings." },
-        { status: 401 }
+        { error: containerData.error?.message || "Failed to create media container" },
+        { status: 502 }
       );
     }
 
-    // TODO: Step 1 - Create media container
-    // POST https://graph.instagram.com/{ig-user-id}/media
-    // {
-    //   media_type: 'REELS',
-    //   video_url: videoUrl,
-    //   caption: caption,
-    //   cover_url: coverUrl,
-    //   access_token: connection.access_token
-    // }
+    const containerId = containerData.id;
 
-    // TODO: Step 2 - Publish the container
-    // POST https://graph.instagram.com/{ig-user-id}/media_publish
-    // { creation_id: containerId, access_token: connection.access_token }
+    // Step 2: Poll until container is FINISHED processing
+    let statusCode = "IN_PROGRESS";
+    let attempts = 0;
+    while (statusCode === "IN_PROGRESS" && attempts < 15) {
+      await new Promise((r) => setTimeout(r, 4000));
+      const statusRes = await fetch(
+        `${GRAPH}/${containerId}?fields=status_code&access_token=${token}`
+      );
+      const statusData = await statusRes.json();
+      statusCode = statusData.status_code ?? "ERROR";
+      attempts++;
+    }
 
-    // Mock response
-    const mockMediaId = `ig_${Date.now()}`;
+    if (statusCode !== "FINISHED") {
+      return NextResponse.json(
+        { error: `Media processing ended with status: ${statusCode}` },
+        { status: 502 }
+      );
+    }
 
-    // Update post record
-    await supabase
-      .from("posts")
-      .update({
-        platform_post_ids: { instagram: mockMediaId },
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", postId);
+    // Step 3: Publish
+    const publishRes = await fetch(`${GRAPH}/${igId}/media_publish`, {
+      method: "POST",
+      body: new URLSearchParams({ creation_id: containerId, access_token: token }),
+    });
+    const publishData = await publishRes.json();
+
+    if (!publishRes.ok || publishData.error) {
+      console.error("Instagram publish error:", publishData);
+      return NextResponse.json(
+        { error: publishData.error?.message || "Failed to publish" },
+        { status: 502 }
+      );
+    }
+
+    const mediaId = publishData.id;
+
+    if (postId) {
+      await supabase
+        .from("posts")
+        .update({
+          platform_post_ids: { instagram: mediaId },
+          status: "published",
+          published_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", postId);
+    }
 
     return NextResponse.json({
       success: true,
-      mediaId: mockMediaId,
-      permalink: `https://www.instagram.com/reel/${mockMediaId}/`,
-      message: "TODO: Replace with actual Instagram Graph API call",
+      mediaId,
+      permalink: `https://www.instagram.com/reel/${mediaId}/`,
     });
   } catch (error) {
     console.error("Instagram post error:", error);
-    return NextResponse.json(
-      { error: "Failed to post to Instagram" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to post to Instagram" }, { status: 500 });
   }
 }

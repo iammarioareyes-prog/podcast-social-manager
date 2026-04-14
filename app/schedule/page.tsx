@@ -1,70 +1,42 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, X, Send, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { PostCreator } from "@/components/schedule/post-creator";
 import { CalendarView } from "@/components/schedule/calendar-view";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import type { Post } from "@/types";
-
-// Mock posts for calendar
-const mockPosts: Post[] = [
-  {
-    id: "1",
-    title: "Episode 47 Teaser",
-    platforms: ["youtube", "instagram", "tiktok"],
-    status: "published",
-    published_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    platform_post_ids: {},
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "2",
-    title: "Ep 47 Highlight Reel",
-    platforms: ["instagram", "tiktok"],
-    status: "published",
-    published_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    platform_post_ids: {},
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "3",
-    title: "Behind the Scenes",
-    platforms: ["youtube", "instagram"],
-    status: "scheduled",
-    scheduled_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-    platform_post_ids: {},
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "4",
-    title: "Episode 48 Promo",
-    platforms: ["youtube", "instagram", "tiktok"],
-    status: "scheduled",
-    scheduled_at: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-    platform_post_ids: {},
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "5",
-    title: "Fan Q&A Clip",
-    platforms: ["tiktok"],
-    status: "scheduled",
-    scheduled_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    platform_post_ids: {},
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
 
 export default function SchedulePage() {
   const [showCreator, setShowCreator] = useState(false);
-  const [posts, setPosts] = useState<Post[]>(mockPosts);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const loadPosts = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/posts?limit=100");
+      const data = await res.json();
+      setPosts(data.posts ?? []);
+    } catch {
+      setPosts([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPosts();
+  }, [loadPosts]);
 
   const handleCreatePost = async (data: {
     title: string;
@@ -76,26 +48,120 @@ export default function SchedulePage() {
     contentUrl: string;
     status: string;
   }) => {
-    // TODO: Save to Supabase via POST /api/posts
-    const newPost: Post = {
-      id: Date.now().toString(),
-      title: data.title,
-      description: data.description,
-      caption: data.caption,
-      hashtags: data.hashtags.split(" ").filter(Boolean),
-      platforms: data.platforms as Post["platforms"],
-      status: data.status as Post["status"],
-      scheduled_at: data.scheduledAt || undefined,
-      content_url: data.contentUrl || undefined,
-      platform_post_ids: {},
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+    try {
+      const res = await fetch("/api/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: data.title,
+          description: data.description,
+          caption: data.caption,
+          hashtags: data.hashtags.split(" ").filter(Boolean),
+          platforms: data.platforms,
+          status: data.status,
+          scheduled_at: data.scheduledAt || null,
+          content_url: data.contentUrl || null,
+        }),
+      });
 
-    setPosts((prev) => [...prev, newPost]);
-    setShowCreator(false);
-    alert(`Post "${data.title}" ${data.status === "scheduled" ? "scheduled" : "saved as draft"}!`);
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Failed to create post");
+
+      setShowCreator(false);
+      showToast(
+        `Post "${data.title}" ${data.status === "scheduled" ? "scheduled" : "saved as draft"}!`
+      );
+      await loadPosts();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to create post", "error");
+    }
   };
+
+  const handlePublishNow = async (post: Post) => {
+    if (!post.content_url) {
+      showToast("No video URL attached to this post", "error");
+      return;
+    }
+
+    setPublishingId(post.id);
+    const errors: string[] = [];
+
+    try {
+      for (const platform of post.platforms) {
+        try {
+          let endpoint = "";
+          let body: Record<string, unknown> = { postId: post.id };
+
+          if (platform === "instagram") {
+            endpoint = "/api/instagram/post";
+            body = {
+              postId: post.id,
+              caption: [post.caption, ...(post.hashtags ?? [])].filter(Boolean).join("\n\n"),
+              videoUrl: post.content_url,
+            };
+          } else if (platform === "tiktok") {
+            endpoint = "/api/tiktok/post";
+            body = {
+              postId: post.id,
+              title: post.title,
+              videoUrl: post.content_url,
+            };
+          } else if (platform === "youtube") {
+            endpoint = "/api/youtube/upload";
+            body = {
+              postId: post.id,
+              title: post.title,
+              description: post.description || post.caption || "",
+              tags: post.hashtags ?? [],
+              videoUrl: post.content_url,
+            };
+          }
+
+          if (!endpoint) continue;
+
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+
+          const result = await res.json();
+          if (!res.ok) {
+            errors.push(`${platform}: ${result.error || "Failed"}`);
+          }
+        } catch {
+          errors.push(`${platform}: Network error`);
+        }
+      }
+
+      if (errors.length === 0) {
+        showToast(`"${post.title}" published successfully!`);
+      } else if (errors.length < post.platforms.length) {
+        showToast(`Partially published. Errors: ${errors.join("; ")}`, "error");
+      } else {
+        showToast(`Publish failed: ${errors.join("; ")}`, "error");
+      }
+
+      await loadPosts();
+    } finally {
+      setPublishingId(null);
+    }
+  };
+
+  const upcomingPosts = posts
+    .filter(
+      (p) =>
+        p.status === "scheduled" &&
+        p.scheduled_at &&
+        new Date(p.scheduled_at) > new Date()
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime()
+    )
+    .slice(0, 6);
+
+  const draftPosts = posts.filter((p) => p.status === "draft").slice(0, 6);
 
   return (
     <div className="flex flex-col">
@@ -104,17 +170,29 @@ export default function SchedulePage() {
         description="Plan and schedule content across all platforms"
       />
 
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 z-50 rounded-lg px-4 py-3 text-sm font-medium shadow-lg transition-all ${
+            toast.type === "success"
+              ? "bg-green-600 text-white"
+              : "bg-red-600 text-white"
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
+
       <div className="flex-1 p-6">
         <div className="mb-6 flex items-center justify-between">
           <div>
             <p className="text-sm text-muted-foreground">
-              {posts.filter((p) => p.status === "scheduled").length} upcoming posts
+              {isLoading
+                ? "Loading..."
+                : `${posts.filter((p) => p.status === "scheduled").length} upcoming posts`}
             </p>
           </div>
-          <Button
-            onClick={() => setShowCreator(true)}
-            className="gap-2"
-          >
+          <Button onClick={() => setShowCreator(true)} className="gap-2">
             <Plus className="h-4 w-4" />
             New Post
           </Button>
@@ -126,65 +204,48 @@ export default function SchedulePage() {
             <CalendarView posts={posts} />
           </div>
 
-          {/* Upcoming posts sidebar */}
-          <div className="xl:col-span-1">
+          {/* Sidebar */}
+          <div className="xl:col-span-1 space-y-4">
+            {/* Upcoming Posts */}
             <div className="rounded-lg border border-border bg-card">
               <div className="border-b border-border p-4">
-                <h3 className="text-sm font-semibold text-foreground">
-                  Upcoming Posts
-                </h3>
+                <h3 className="text-sm font-semibold text-foreground">Upcoming Posts</h3>
               </div>
               <div className="divide-y divide-border">
-                {posts
-                  .filter(
-                    (p) =>
-                      p.status === "scheduled" &&
-                      p.scheduled_at &&
-                      new Date(p.scheduled_at) > new Date()
-                  )
-                  .sort(
-                    (a, b) =>
-                      new Date(a.scheduled_at!).getTime() -
-                      new Date(b.scheduled_at!).getTime()
-                  )
-                  .slice(0, 6)
-                  .map((post) => (
-                    <div key={post.id} className="p-3 hover:bg-accent/20">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {post.title}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {post.scheduled_at &&
-                          new Date(post.scheduled_at).toLocaleString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                            hour12: true,
-                          })}
-                      </p>
-                      <div className="mt-1.5 flex items-center gap-1">
-                        {post.platforms.map((p) => (
-                          <span
-                            key={p}
-                            className="rounded-full bg-accent px-1.5 py-0.5 text-xs text-muted-foreground capitalize"
-                          >
-                            {p}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-
-                {posts.filter(
-                  (p) => p.status === "scheduled" && p.scheduled_at && new Date(p.scheduled_at) > new Date()
-                ).length === 0 && (
+                {upcomingPosts.map((post) => (
+                  <PostSidebarRow
+                    key={post.id}
+                    post={post}
+                    isPublishing={publishingId === post.id}
+                    onPublish={() => handlePublishNow(post)}
+                  />
+                ))}
+                {!isLoading && upcomingPosts.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground">
                     No upcoming posts scheduled
                   </div>
                 )}
               </div>
             </div>
+
+            {/* Draft Posts */}
+            {draftPosts.length > 0 && (
+              <div className="rounded-lg border border-border bg-card">
+                <div className="border-b border-border p-4">
+                  <h3 className="text-sm font-semibold text-foreground">Drafts</h3>
+                </div>
+                <div className="divide-y divide-border">
+                  {draftPosts.map((post) => (
+                    <PostSidebarRow
+                      key={post.id}
+                      post={post}
+                      isPublishing={publishingId === post.id}
+                      onPublish={() => handlePublishNow(post)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -208,6 +269,75 @@ export default function SchedulePage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function PostSidebarRow({
+  post,
+  isPublishing,
+  onPublish,
+}: {
+  post: Post;
+  isPublishing: boolean;
+  onPublish: () => void;
+}) {
+  const dateStr = post.scheduled_at || post.created_at;
+  return (
+    <div className="p-3 hover:bg-accent/20">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-foreground truncate">{post.title}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {dateStr &&
+              new Date(dateStr).toLocaleString("en-US", {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+              })}
+          </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            {post.platforms.map((p) => (
+              <span
+                key={p}
+                className="rounded-full bg-accent px-1.5 py-0.5 text-xs text-muted-foreground capitalize"
+              >
+                {p}
+              </span>
+            ))}
+            <Badge
+              variant="secondary"
+              className={`text-xs ${
+                post.status === "published"
+                  ? "bg-green-500/10 text-green-500"
+                  : post.status === "scheduled"
+                  ? "bg-blue-500/10 text-blue-500"
+                  : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {post.status}
+            </Badge>
+          </div>
+        </div>
+        {post.status !== "published" && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-shrink-0 h-7 px-2 text-xs gap-1"
+            onClick={onPublish}
+            disabled={isPublishing}
+          >
+            {isPublishing ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Send className="h-3 w-3" />
+            )}
+            {isPublishing ? "Posting…" : "Publish Now"}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
