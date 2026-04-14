@@ -244,13 +244,26 @@ export default function ContentPage() {
                   and connect Google Drive to browse your clips
                 </p>
               </>
+            ) : driveError === "token_expired" ? (
+              <>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Google Drive session expired
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground/60">
+                  Go to{" "}
+                  <a href="/settings" className="underline hover:text-foreground">
+                    Settings
+                  </a>
+                  , disconnect Google Drive, then reconnect it
+                </p>
+              </>
             ) : driveError ? (
               <>
                 <p className="text-sm font-medium text-muted-foreground">
                   Could not load Google Drive files
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground/60">
-                  Error: {driveError} — try reconnecting Google Drive in{" "}
+                  Try reconnecting Google Drive in{" "}
                   <a href="/settings" className="underline hover:text-foreground">
                     Settings
                   </a>
