@@ -42,23 +42,41 @@ export async function GET(request: NextRequest) {
     });
     const userInfo = await userRes.json();
 
-    await supabase.from("platform_connections").upsert(
-      {
-        platform: "google_drive",
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
-        platform_user_id: userInfo.id,
-        platform_username: userInfo.email,
-        is_connected: true,
-        metadata: {
-          email: userInfo.email,
-          name: userInfo.name,
-          folder_id: process.env.GOOGLE_DRIVE_FOLDER_ID || "",
-        },
+    // Try update first; if no row exists yet, insert
+    const { data: existing } = await supabase
+      .from("platform_connections")
+      .select("id")
+      .eq("platform", "google_drive")
+      .limit(1)
+      .maybeSingle();
+
+    const payload = {
+      platform: "google_drive",
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+      platform_user_id: userInfo.id,
+      platform_username: userInfo.email,
+      is_connected: true,
+      metadata: {
+        email: userInfo.email,
+        name: userInfo.name,
+        folder_id: process.env.GOOGLE_DRIVE_FOLDER_ID || "",
       },
-      { onConflict: "platform" }
-    );
+    };
+
+    if (existing?.id) {
+      const { error: updateErr } = await supabase
+        .from("platform_connections")
+        .update(payload)
+        .eq("id", existing.id);
+      if (updateErr) console.error("Drive connection update error:", updateErr);
+    } else {
+      const { error: insertErr } = await supabase
+        .from("platform_connections")
+        .insert(payload);
+      if (insertErr) console.error("Drive connection insert error:", insertErr);
+    }
 
     return NextResponse.redirect(`${appUrl}/settings?success=drive_connected`);
   } catch (err) {

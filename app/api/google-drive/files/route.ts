@@ -23,7 +23,9 @@ export async function GET(req: NextRequest) {
       .from("platform_connections")
       .select("access_token, refresh_token, token_expires_at, is_connected")
       .eq("platform", "google_drive")
-      .single();
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (!connection?.is_connected || !connection?.access_token) {
       return NextResponse.json(
