@@ -33,7 +33,8 @@ export async function GET(request: NextRequest) {
 
     if (!tokenRes.ok || tokens.error) {
       console.error("Google Drive token exchange failed:", tokens);
-      return NextResponse.redirect(`${appUrl}/settings?error=drive_token_failed`);
+      const reason = encodeURIComponent(tokens.error_description || tokens.error || "unknown");
+      return NextResponse.redirect(`${appUrl}/settings?error=drive_token_failed&reason=${reason}`);
     }
 
     // Fetch user info to get display name
