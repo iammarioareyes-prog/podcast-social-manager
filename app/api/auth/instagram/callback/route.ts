@@ -58,34 +58,40 @@ export async function GET(request: NextRequest) {
     const pagesData = await pagesRes.json();
     const pages = pagesData.data || [];
 
-    let instagramAccountId = null;
-    let instagramUsername = null;
-    let pageAccessToken = accessToken;
-
-    // Find the first page with a connected Instagram Business Account
+    // Collect ALL Instagram accounts across all pages
+    const igAccounts: { accountId: string; username: string; pageAccessToken: string }[] = [];
     for (const page of pages) {
       const igRes = await fetch(
         `https://graph.facebook.com/v19.0/${page.id}?fields=instagram_business_account&access_token=${page.access_token}`
       );
       const igData = await igRes.json();
       if (igData.instagram_business_account?.id) {
-        instagramAccountId = igData.instagram_business_account.id;
-        pageAccessToken = page.access_token;
-
-        // Get Instagram username
         const igUserRes = await fetch(
-          `https://graph.facebook.com/v19.0/${instagramAccountId}?fields=username,name&access_token=${pageAccessToken}`
+          `https://graph.facebook.com/v19.0/${igData.instagram_business_account.id}?fields=username,name&access_token=${page.access_token}`
         );
         const igUserData = await igUserRes.json();
-        instagramUsername = igUserData.username || igUserData.name || instagramAccountId;
-        break;
+        igAccounts.push({
+          accountId: igData.instagram_business_account.id,
+          username: igUserData.username || igUserData.name || igData.instagram_business_account.id,
+          pageAccessToken: page.access_token,
+        });
       }
     }
 
-    if (!instagramAccountId) {
+    if (igAccounts.length === 0) {
       console.error("No Instagram Business Account found on connected Facebook Pages");
       return NextResponse.redirect(`${appUrl}/settings?error=instagram_no_business_account`);
     }
+
+    // Prefer the configured username (INSTAGRAM_PREFERRED_USERNAME), otherwise use first found
+    const preferredUsername = process.env.INSTAGRAM_PREFERRED_USERNAME?.toLowerCase();
+    const chosen = (preferredUsername
+      ? igAccounts.find((a) => a.username.toLowerCase() === preferredUsername)
+      : null) ?? igAccounts[0];
+
+    const instagramAccountId = chosen.accountId;
+    const instagramUsername = chosen.username;
+    const pageAccessToken = chosen.pageAccessToken;
 
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
