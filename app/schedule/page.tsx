@@ -92,18 +92,20 @@ export default function SchedulePage() {
           let endpoint = "";
           let body: Record<string, unknown> = { postId: post.id };
 
+          const captions = (post.captions_json as Record<string, string>) ?? {};
+
           if (platform === "instagram") {
             endpoint = "/api/instagram/post";
             body = {
               postId: post.id,
-              caption: [post.caption, ...(post.hashtags ?? [])].filter(Boolean).join("\n\n"),
+              caption: captions.instagram || [post.caption, ...(post.hashtags ?? [])].filter(Boolean).join("\n\n"),
               videoUrl: post.content_url,
             };
           } else if (platform === "tiktok") {
             endpoint = "/api/tiktok/post";
             body = {
               postId: post.id,
-              title: post.title,
+              title: captions.tiktok || post.title,
               videoUrl: post.content_url,
             };
           } else if (platform === "youtube") {
@@ -111,7 +113,7 @@ export default function SchedulePage() {
             body = {
               postId: post.id,
               title: post.title,
-              description: post.description || post.caption || "",
+              description: captions.youtube || post.description || post.caption || "",
               tags: post.hashtags ?? [],
               videoUrl: post.content_url,
             };
