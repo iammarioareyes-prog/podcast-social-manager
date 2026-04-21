@@ -30,6 +30,7 @@ interface PostFormData {
   scheduledAt: string;
   contentUrl: string;
   status: "draft" | "scheduled";
+  captions_json: Record<string, string>;
 }
 
 const platformIcons = {
@@ -48,6 +49,7 @@ export function PostCreator({ onSubmit }: PostCreatorProps) {
     scheduledAt: "",
     contentUrl: "",
     status: "draft",
+    captions_json: {},
   });
 
   const [generatedCaptions, setGeneratedCaptions] = useState<CaptionData[]>([]);
@@ -87,11 +89,21 @@ export function PostCreator({ onSubmit }: PostCreatorProps) {
       }
 
       const data = await response.json();
-      setGeneratedCaptions(data.captions || []);
+      const captions: CaptionData[] = data.captions || [];
+      setGeneratedCaptions(captions);
+
+      // Auto-save all platform captions to captions_json
+      const captionsJson: Record<string, string> = {};
+      for (const c of captions) {
+        captionsJson[c.platform] = c.hashtags.length
+          ? `${c.caption}\n\n${c.hashtags.map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" ")}`
+          : c.caption;
+      }
+      setFormData((prev) => ({ ...prev, captions_json: captionsJson }));
 
       // Set active caption to first platform
-      if (data.captions?.length > 0) {
-        setActiveCaption(data.captions[0].platform);
+      if (captions.length > 0) {
+        setActiveCaption(captions[0].platform);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate captions");

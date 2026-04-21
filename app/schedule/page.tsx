@@ -47,6 +47,7 @@ export default function SchedulePage() {
     scheduledAt: string;
     contentUrl: string;
     status: string;
+    captions_json?: Record<string, string>;
   }) => {
     try {
       const res = await fetch("/api/posts", {
@@ -61,6 +62,9 @@ export default function SchedulePage() {
           status: data.status,
           scheduled_at: data.scheduledAt || null,
           content_url: data.contentUrl || null,
+          captions_json: data.captions_json && Object.keys(data.captions_json).length > 0
+            ? data.captions_json
+            : null,
         }),
       });
 

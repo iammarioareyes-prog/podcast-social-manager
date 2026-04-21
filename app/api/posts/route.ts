@@ -68,6 +68,7 @@ export async function POST(req: NextRequest) {
       scheduled_at,
       content_url,
       thumbnail_url,
+      captions_json,
     } = body;
 
     if (!title || !platforms || platforms.length === 0) {
@@ -91,6 +92,7 @@ export async function POST(req: NextRequest) {
         scheduled_at: scheduled_at || null,
         content_url: content_url || null,
         thumbnail_url: thumbnail_url || null,
+        captions_json: captions_json || null,
         platform_post_ids: {},
       })
       .select()
