@@ -50,28 +50,35 @@ async function handleGenerateCaptions(params: {
   const platformInstructions = platforms
     .map((p) => {
       if (p === "youtube") {
-        return "YouTube Shorts: engaging caption (150-300 chars), 3-5 targeted hashtags";
+        return `YouTube Shorts description: MINIMUM 170 words. Start with a compelling hook, expand on the episode theme with context and insight, include a call-to-action (e.g. "Full episode on the channel — subscribe!"), mention guest name if applicable. End with 5-8 relevant hashtags. No @tags.`;
       } else if (p === "instagram") {
-        return "Instagram Reels: compelling caption with hook (up to 2200 chars visible), 10-15 hashtags, use emojis";
+        return `Instagram Reels caption: MINIMUM 170 words. Open with a bold 1-2 sentence hook. Then write 3-4 short paragraphs expanding on the topic — share a real insight, ask the audience a question, connect the clip to a bigger theme. End with a call-to-action ("Link in bio" or "Share this with someone who needs it"). On a new line, add the account handles as plain text @mentions (NOT tagged users): @iammarioareyes @tamishaharris @mrchrisclassic @jermailshelton @undugubrotherhood. End with 15-20 relevant hashtags. Use emojis throughout.`;
       } else if (p === "tiktok") {
-        return "TikTok: punchy hook-driven caption under 150 chars, 3-5 trending hashtags";
+        return `TikTok caption: MINIMUM 170 words. Hook in the first line (this shows before "more"). Then write conversational, punchy paragraphs — speak directly to the viewer, share the "why this matters" angle, build curiosity about the full episode. End with a question to drive comments. Add 5-8 trending hashtags. Use emojis.`;
       }
       return "";
     })
     .filter(Boolean)
-    .join("\n");
+    .join("\n\n");
 
-  const prompt = `You are a social media expert specializing in podcast content promotion.
+  const prompt = `You are a social media content writer for the "I Am Mario Areyes" podcast — a show about faith, mindset, Black excellence, entrepreneurship, and real conversations with real people.
 
-Podcast: "${podcastName}"
+Podcast: "${podcastName || "I Am Mario Areyes"}"
 Content Title: "${title}"
 Description: "${description}"
 ${episode ? `Episode: ${episode}` : ""}
 
-Generate optimized social media captions and hashtags for these platforms:
+Write platform-optimized captions for the following platforms. EVERY caption must be at minimum 170 words. Count carefully — do not submit anything shorter.
+
 ${platformInstructions}
 
-Return ONLY a valid JSON array with this exact structure, no other text:
+IMPORTANT:
+- Each caption must be genuinely different, written for how that platform's audience reads and engages
+- Do NOT use generic filler — make the copy feel real, personal, and on-brand for a Black faith/mindset podcast
+- The @mentions on Instagram go in the caption text as plain text only (do not suggest tagging users via the API)
+- 170 words is a hard minimum. Longer is fine.
+
+Return ONLY a valid JSON array with this exact structure, no markdown, no extra text:
 [
   {
     "platform": "youtube",
@@ -80,12 +87,11 @@ Return ONLY a valid JSON array with this exact structure, no other text:
   }
 ]
 
-Include only platforms: ${platforms.join(", ")}
-Make each caption unique and optimized for the specific platform algorithm.`;
+Include only platforms: ${platforms.join(", ")}`;
 
   const message = await anthropic.messages.create({
     model: "claude-opus-4-5",
-    max_tokens: 2000,
+    max_tokens: 4000,
     messages: [{ role: "user", content: prompt }],
   });
 
