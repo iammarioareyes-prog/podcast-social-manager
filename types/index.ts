@@ -18,6 +18,7 @@ export interface Post {
   content_url?: string;
   thumbnail_url?: string;
   platform_post_ids: Record<string, string>;
+  captions_json?: Record<string, string>;
   created_at: string;
   updated_at: string;
 }
