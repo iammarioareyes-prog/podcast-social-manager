@@ -45,7 +45,6 @@ export default function DashboardPage() {
     {
       title: "Total Views",
       value: loading ? "…" : totalViews.toLocaleString(),
-      trend: null,
       icon: Eye,
       iconColor: "text-blue-400",
       iconBg: "bg-blue-400/10",
@@ -53,7 +52,6 @@ export default function DashboardPage() {
     {
       title: "Total Followers",
       value: loading ? "…" : totalFollowers.toLocaleString(),
-      trend: null,
       icon: Users,
       iconColor: "text-green-400",
       iconBg: "bg-green-400/10",
@@ -61,7 +59,6 @@ export default function DashboardPage() {
     {
       title: "TikTok Likes",
       value: loading ? "…" : (stats?.tiktok.likes ?? 0).toLocaleString(),
-      trend: null,
       icon: TrendingUp,
       iconColor: "text-purple-400",
       iconBg: "bg-purple-400/10",
@@ -69,7 +66,6 @@ export default function DashboardPage() {
     {
       title: "Posts This Month",
       value: loading ? "…" : (stats?.postsThisMonth ?? 0),
-      trend: null,
       icon: Calendar,
       iconColor: "text-orange-400",
       iconBg: "bg-orange-400/10",
