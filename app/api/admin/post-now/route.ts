@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createAgentSupabaseClient, markDriveIdsAsPosted, validateCronRequest } from "@/lib/agent-utils";
+import { NextResponse } from "next/server";
+import { createAgentSupabaseClient, markDriveIdsAsPosted } from "@/lib/agent-utils";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -9,14 +9,10 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://iamm-podcast-mgr-v1.
 /**
  * GET /api/admin/post-now
  *
- * One-shot endpoint: finds ALL scheduled posts for today that haven't been
- * published yet (regardless of scheduled_at time) and posts them immediately.
- * Uses same CRON_SECRET auth as /api/agent/run.
+ * One-shot admin endpoint: finds ALL scheduled posts for today that haven't
+ * been published yet (regardless of scheduled_at time) and posts them now.
  */
-export async function GET(req: NextRequest) {
-  if (!validateCronRequest(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function GET() {
 
   const supabase = createAgentSupabaseClient();
 
