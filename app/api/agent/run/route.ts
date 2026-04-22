@@ -11,14 +11,22 @@ export const maxDuration = 60;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://iamm-podcast-mgr-v1.vercel.app";
 
 /**
- * POST /api/agent/run
+ * Vercel cron jobs send GET requests — this is the primary handler.
+ * POST is kept as an alias for manual triggers (e.g. curl, dashboard button).
  *
  * Called 3× daily (9am / 2pm / 7pm EDT) Mon–Sat by Vercel cron.
- * Checks the current week pattern and skips if today isn't a posting day.
- * Finds any scheduled posts due within a 15-minute window and posts them
+ * Finds any scheduled posts due within a ±10-minute window and posts them
  * to Instagram, TikTok, and YouTube simultaneously.
  */
+export async function GET(req: NextRequest) {
+  return runAgent(req);
+}
+
 export async function POST(req: NextRequest) {
+  return runAgent(req);
+}
+
+async function runAgent(req: NextRequest) {
   if (!validateCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -30,8 +38,6 @@ export async function POST(req: NextRequest) {
   const windowStart = new Date(now.getTime() - 10 * 60 * 1000);
   const windowEnd   = new Date(now.getTime() + 10 * 60 * 1000);
 
-  // Use 'publishing' status as a lock to prevent double-posting
-  // First claim them atomically
   const { data: duePosts, error: fetchErr } = await supabase
     .from("posts")
     .select("*")

@@ -17,11 +17,19 @@ export const maxDuration = 60;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://iamm-podcast-mgr-v1.vercel.app";
 
 // ─────────────────────────────────────────────────────────────
-// POST /api/agent/scan
+// GET /api/agent/scan  — Vercel cron sends GET requests
+// POST /api/agent/scan — kept for manual triggers
 // Called every Sunday night (Monday 00:00 UTC) by Vercel cron.
-// Can also be triggered manually with the CRON_SECRET.
 // ─────────────────────────────────────────────────────────────
+export async function GET(req: NextRequest) {
+  return runScan(req);
+}
+
 export async function POST(req: NextRequest) {
+  return runScan(req);
+}
+
+async function runScan(req: NextRequest) {
   if (!validateCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
