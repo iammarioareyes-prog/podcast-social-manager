@@ -9,8 +9,8 @@ import { RecentPosts } from "@/components/dashboard/recent-posts";
 import { PlatformStatCard } from "@/components/dashboard/platform-stat-card";
 
 interface PlatformStats {
-  instagram: { followers: number; posts: number; connected: boolean; error: string };
-  youtube:   { subscribers: number; views: number; videos: number; connected: boolean; error: string };
+  instagram: { followers: number; posts: number; reach: number; engagement: number; connected: boolean; error: string };
+  youtube:   { subscribers: number; views: number; videos: number; engagement: number; connected: boolean; error: string };
   tiktok:    { followers: number; likes: number; videos: number; connected: boolean; error: string };
   postsThisMonth: number;
 }
@@ -80,7 +80,7 @@ export default function DashboardPage() {
       bgColor: "bg-red-500/10",
       views: stats?.youtube.views ?? 0,
       followers: stats?.youtube.subscribers ?? 0,
-      engagement: 0,
+      engagement: stats?.youtube.engagement ?? 0,
       posts: stats?.youtube.videos ?? 0,
       isConnected: stats?.youtube.connected ?? false,
     },
@@ -89,9 +89,9 @@ export default function DashboardPage() {
       icon: Instagram,
       color: "text-pink-500",
       bgColor: "bg-pink-500/10",
-      views: 0,
+      views: stats?.instagram.reach ?? 0,
       followers: stats?.instagram.followers ?? 0,
-      engagement: 0,
+      engagement: stats?.instagram.engagement ?? 0,
       posts: stats?.instagram.posts ?? 0,
       isConnected: stats?.instagram.connected ?? false,
     },

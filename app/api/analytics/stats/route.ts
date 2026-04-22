@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -104,8 +105,8 @@ async function getFreshTikTokToken(conn: {
 
 export async function GET() {
   const stats = {
-    instagram: { followers: 0, posts: 0, connected: false, error: "" },
-    youtube:   { subscribers: 0, views: 0, videos: 0, connected: false, error: "" },
+    instagram: { followers: 0, posts: 0, reach: 0, engagement: 0, connected: false, error: "" },
+    youtube:   { subscribers: 0, views: 0, videos: 0, engagement: 0, connected: false, error: "" },
     tiktok:    { followers: 0, likes: 0, videos: 0, connected: false, error: "" },
     postsThisMonth: 0,
   };
@@ -125,6 +126,8 @@ export async function GET() {
   if (ig?.access_token) {
     try {
       const igId = ig.metadata?.instagram_account_id || ig.platform_user_id;
+
+      // Basic account stats
       const res = await fetch(
         `${GRAPH}/${igId}?fields=followers_count,media_count&access_token=${ig.access_token}`
       );
@@ -133,6 +136,22 @@ export async function GET() {
       stats.instagram.followers = data.followers_count ?? 0;
       stats.instagram.posts     = data.media_count ?? 0;
       stats.instagram.connected = true;
+
+      // Fetch recent 20 posts to compute reach (likes) and engagement rate
+      const mediaRes = await fetch(
+        `${GRAPH}/${igId}/media?fields=like_count,comments_count&limit=20&access_token=${ig.access_token}`
+      );
+      const mediaData = await mediaRes.json();
+      const mediaItems: Array<{ like_count?: number; comments_count?: number }> = mediaData.data || [];
+      if (mediaItems.length > 0) {
+        const totalLikes    = mediaItems.reduce((s, m) => s + (m.like_count    ?? 0), 0);
+        const totalComments = mediaItems.reduce((s, m) => s + (m.comments_count ?? 0), 0);
+        const totalInteractions = totalLikes + totalComments;
+        stats.instagram.reach = totalLikes; // likes as reach proxy
+        stats.instagram.engagement = stats.instagram.followers > 0
+          ? (totalInteractions / (mediaItems.length * stats.instagram.followers)) * 100
+          : 0;
+      }
     } catch (e: any) {
       stats.instagram.error = e.message;
     }
@@ -143,8 +162,10 @@ export async function GET() {
   if (yt?.access_token) {
     try {
       const token = await getFreshYouTubeToken(yt);
+
+      // Channel-level stats + uploads playlist ID
       const res = await fetch(
-        "https://www.googleapis.com/youtube/v3/channels?part=statistics&mine=true",
+        "https://www.googleapis.com/youtube/v3/channels?part=statistics,contentDetails&mine=true",
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json();
@@ -154,6 +175,37 @@ export async function GET() {
       stats.youtube.views       = parseInt(s.viewCount ?? "0", 10);
       stats.youtube.videos      = parseInt(s.videoCount ?? "0", 10);
       stats.youtube.connected   = true;
+
+      // Compute engagement from recent 10 videos (likes + comments) / views
+      const uploadsPlaylistId = data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+      if (uploadsPlaylistId) {
+        const plRes = await fetch(
+          `https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&playlistId=${uploadsPlaylistId}&maxResults=10`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const plData = await plRes.json();
+        const videoIds = (plData.items ?? [])
+          .map((i: any) => i.contentDetails?.videoId)
+          .filter(Boolean)
+          .join(",");
+
+        if (videoIds) {
+          const vRes = await fetch(
+            `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          const vData = await vRes.json();
+          let totalLikes = 0, totalComments = 0, totalVViews = 0;
+          for (const v of vData.items ?? []) {
+            totalLikes    += parseInt(v.statistics?.likeCount    ?? "0", 10);
+            totalComments += parseInt(v.statistics?.commentCount ?? "0", 10);
+            totalVViews   += parseInt(v.statistics?.viewCount    ?? "0", 10);
+          }
+          stats.youtube.engagement = totalVViews > 0
+            ? ((totalLikes + totalComments) / totalVViews) * 100
+            : 0;
+        }
+      }
     } catch (e: any) {
       stats.youtube.error = e.message;
     }
