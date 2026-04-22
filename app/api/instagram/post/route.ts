@@ -37,11 +37,23 @@ export async function POST(req: NextRequest) {
 
     const token = conn.access_token;
 
+    // Append custom hashtags from INSTAGRAM_HASHTAGS env var (space or comma separated)
+    let finalCaption = caption;
+    const envHashtags = process.env.INSTAGRAM_HASHTAGS;
+    if (envHashtags) {
+      const tags = envHashtags
+        .split(/[\s,]+/)
+        .filter(Boolean)
+        .map((t) => (t.startsWith("#") ? t : `#${t}`))
+        .join(" ");
+      finalCaption = `${caption}\n\n${tags}`;
+    }
+
     // Step 1: Create media container
     const containerParams = new URLSearchParams({
       media_type: "REELS",
       video_url: videoUrl,
-      caption,
+      caption: finalCaption,
       access_token: token,
     });
     if (coverUrl) containerParams.set("cover_url", coverUrl);

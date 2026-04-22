@@ -50,11 +50,11 @@ async function handleGenerateCaptions(params: {
   const platformInstructions = platforms
     .map((p) => {
       if (p === "youtube") {
-        return `YouTube Shorts description: MINIMUM 170 words. Start with a compelling hook, expand on the episode theme with context and insight, include a call-to-action (e.g. "Full episode on the channel — subscribe!"), mention guest name if applicable. End with 5-8 relevant hashtags. No @tags.`;
+        return `YouTube Shorts description: MINIMUM 170 words. Start with a compelling hook, expand on the episode theme with context and insight, include a call-to-action (e.g. "Full episode on the channel — subscribe!"), mention guest name if applicable. No @tags. DO NOT include any hashtags in the caption text — put them ONLY in the "hashtags" array.`;
       } else if (p === "instagram") {
-        return `Instagram Reels caption: MINIMUM 170 words. Open with a bold 1-2 sentence hook. Then write 3-4 short paragraphs expanding on the topic — share a real insight, ask the audience a question, connect the clip to a bigger theme. End with a call-to-action ("Link in bio" or "Share this with someone who needs it"). On a new line, add the account handles as plain text @mentions (NOT tagged users): @iammarioareyes @tamishaharris @mrchrisclassic @jermailshelton @undugubrotherhood. End with 15-20 relevant hashtags. Use emojis throughout.`;
+        return `Instagram Reels caption: MINIMUM 170 words. Open with a bold 1-2 sentence hook. Then write 3-4 short paragraphs expanding on the topic — share a real insight, ask the audience a question, connect the clip to a bigger theme. End with a call-to-action ("Link in bio" or "Share this with someone who needs it"). On a new line, add the account handles as plain text @mentions (NOT tagged users): @iammarioareyes @tamishaharris @mrchrisclassic @jermailshelton @undugubrotherhood. Use emojis throughout. DO NOT include any hashtags in the caption text — put them ONLY in the "hashtags" array.`;
       } else if (p === "tiktok") {
-        return `TikTok caption: MINIMUM 170 words. Hook in the first line (this shows before "more"). Then write conversational, punchy paragraphs — speak directly to the viewer, share the "why this matters" angle, build curiosity about the full episode. End with a question to drive comments. Add 5-8 trending hashtags. Use emojis.`;
+        return `TikTok caption: MINIMUM 170 words. Hook in the first line (this shows before "more"). Then write conversational, punchy paragraphs — speak directly to the viewer, share the "why this matters" angle, build curiosity about the full episode. End with a question to drive comments. Use emojis. DO NOT include any hashtags in the caption text — put them ONLY in the "hashtags" array.`;
       }
       return "";
     })
@@ -77,6 +77,7 @@ IMPORTANT:
 - Do NOT use generic filler — make the copy feel real, personal, and on-brand for a Black faith/mindset podcast
 - The @mentions on Instagram go in the caption text as plain text only (do not suggest tagging users via the API)
 - 170 words is a hard minimum. Longer is fine.
+- CRITICAL: Hashtags ONLY go in the "hashtags" array. Never write hashtags inside the caption body text.
 
 Return ONLY a valid JSON array with this exact structure, no markdown, no extra text:
 [
