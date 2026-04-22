@@ -102,6 +102,28 @@ export async function POST(req: NextRequest) {
       sourceUrl = `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`;
     }
 
+    // Append brand hashtags from voice_profile settings
+    const { data: vpData } = await supabase
+      .from("voice_profile")
+      .select("youtube_hashtags")
+      .limit(1)
+      .maybeSingle();
+
+    const brandHashtags: string[] = vpData?.youtube_hashtags || [];
+    let finalDescription = description;
+    const finalTags = [...tags];
+    if (brandHashtags.length > 0) {
+      const tagString = brandHashtags
+        .map((t) => (t.startsWith("#") ? t : `#${t}`))
+        .join(" ");
+      finalDescription = `${description}\n\n${tagString}`;
+      // Also add to YouTube tags array (without #)
+      for (const tag of brandHashtags) {
+        const clean = tag.replace(/^#/, "");
+        if (!finalTags.includes(clean)) finalTags.push(clean);
+      }
+    }
+
     // Step 1: Create a resumable upload session on YouTube
     const ytInitRes = await fetch(
       "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
@@ -116,8 +138,8 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           snippet: {
             title: title.slice(0, 100),
-            description: description.slice(0, 5000),
-            tags: tags.slice(0, 500),
+            description: finalDescription.slice(0, 5000),
+            tags: finalTags.slice(0, 500),
             categoryId: "22", // People & Blogs
           },
           status: {

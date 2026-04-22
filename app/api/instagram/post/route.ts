@@ -37,16 +37,20 @@ export async function POST(req: NextRequest) {
 
     const token = conn.access_token;
 
-    // Append custom hashtags from INSTAGRAM_HASHTAGS env var (space or comma separated)
+    // Append brand hashtags from voice_profile settings
     let finalCaption = caption;
-    const envHashtags = process.env.INSTAGRAM_HASHTAGS;
-    if (envHashtags) {
-      const tags = envHashtags
-        .split(/[\s,]+/)
-        .filter(Boolean)
+    const { data: vpData } = await supabase
+      .from("voice_profile")
+      .select("ig_hashtags")
+      .limit(1)
+      .maybeSingle();
+
+    const brandHashtags: string[] = vpData?.ig_hashtags || [];
+    if (brandHashtags.length > 0) {
+      const tagString = brandHashtags
         .map((t) => (t.startsWith("#") ? t : `#${t}`))
         .join(" ");
-      finalCaption = `${caption}\n\n${tags}`;
+      finalCaption = `${caption}\n\n${tagString}`;
     }
 
     // Step 1: Create media container

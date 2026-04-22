@@ -74,6 +74,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Append brand hashtags from voice_profile settings
+    const { data: vpData } = await supabase
+      .from("voice_profile")
+      .select("tiktok_hashtags")
+      .limit(1)
+      .maybeSingle();
+
+    const brandHashtags: string[] = vpData?.tiktok_hashtags || [];
+    let finalTitle = title;
+    if (brandHashtags.length > 0) {
+      const tagString = brandHashtags
+        .map((t) => (t.startsWith("#") ? t : `#${t}`))
+        .join(" ");
+      finalTitle = `${title}\n\n${tagString}`;
+    }
+
     // Step 1: Initialize the post with PULL_FROM_URL
     const initRes = await fetch(`${TIKTOK_API}/post/publish/video/init/`, {
       method: "POST",
@@ -83,7 +99,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         post_info: {
-          title: title.slice(0, 150), // TikTok title max 150 chars
+          title: finalTitle.slice(0, 2200), // TikTok description max 2200 chars
           privacy_level: privacyLevel,
           disable_duet: disableDuet,
           disable_comment: disableComment,
