@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   createAgentSupabaseClient,
-  getWeekPattern,
-  isTodayPostingDay,
   markDriveIdsAsPosted,
   validateCronRequest,
 } from "@/lib/agent-utils";
@@ -26,16 +24,6 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createAgentSupabaseClient();
-  const weekPattern = await getWeekPattern(supabase);
-
-  // ── Skip if today is not a posting day for this week's pattern ──────────
-  if (!isTodayPostingDay(weekPattern)) {
-    return NextResponse.json({
-      skipped: true,
-      reason: `Week pattern ${weekPattern}: today is not a posting day`,
-      weekPattern,
-    });
-  }
 
   // ── Find scheduled posts due within ±10 minutes of now ──────────────────
   const now = new Date();
@@ -140,7 +128,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ success: true, weekPattern, posted: results.length, results });
+  return NextResponse.json({ success: true, posted: results.length, results });
 }
 
 // ─────────────────────────────────────────────────────────────
