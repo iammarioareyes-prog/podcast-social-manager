@@ -128,8 +128,8 @@ export function Sidebar() {
         </div>
       </nav>
 
-      {/* Settings */}
-      <div className="border-t border-border p-4">
+      {/* Settings + Legal */}
+      <div className="border-t border-border p-4 space-y-1">
         <Link
           href="/settings"
           className={cn(
@@ -142,6 +142,21 @@ export function Sidebar() {
           <Settings className="h-4 w-4" />
           Settings
         </Link>
+        <div className="flex items-center gap-3 px-3 py-1">
+          <Link
+            href="/privacy"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Privacy Policy
+          </Link>
+          <span className="text-muted-foreground text-xs">·</span>
+          <Link
+            href="/terms"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Terms of Service
+          </Link>
+        </div>
       </div>
     </div>
   );
