@@ -5,24 +5,12 @@
   "installCommand": "npm install",
   "crons": [
     {
-      "path": "/api/analytics/sync",
-      "schedule": "0 9 * * *"
+      "path": "/api/agent/run",
+      "schedule": "0 13,18,23 * * 1-6"
     },
     {
       "path": "/api/agent/scan",
       "schedule": "0 0 * * 1"
-    },
-    {
-      "path": "/api/agent/run",
-      "schedule": "0 13 * * 1-6"
-    },
-    {
-      "path": "/api/agent/run",
-      "schedule": "0 18 * * 1-6"
-    },
-    {
-      "path": "/api/agent/run",
-      "schedule": "0 23 * * 1-6"
     }
   ]
 }
