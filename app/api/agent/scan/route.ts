@@ -5,11 +5,10 @@ import {
   createAgentSupabaseClient,
   getDriveAccessToken,
   listGuestSubfolders,
-  pickRandomClips,
-  computePostingSchedule,
-  flipWeekPattern,
+  listClipsInFolder,
   validateCronRequest,
 } from "@/lib/agent-utils";
+import type { DriveFile } from "@/lib/google-drive";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -56,38 +55,73 @@ async function runScan(req: NextRequest) {
     return NextResponse.json({ error: "Google Drive not connected" }, { status: 503 });
   }
 
-  // ── Get week pattern and compute schedule BEFORE flipping ────────────────
-  // We read the current pattern, generate the schedule for it, then flip.
-  const { data: patternRow } = await supabase
-    .from("agent_config")
-    .select("value")
-    .eq("key", "week_pattern")
-    .single();
-  const weekPattern: "A" | "B" = (patternRow?.value as "A" | "B") ?? "A";
-  const scheduledTimes = computePostingSchedule(weekPattern);
-
   // ── Get already-posted Drive IDs ──────────────────────────────────────────
   const { data: configRow } = await supabase
     .from("agent_config")
     .select("value")
     .eq("key", "posted_drive_ids")
-    .single();
+    .maybeSingle();
   const postedIds: string[] = (configRow?.value as string[]) ?? [];
 
-  // ── Pick 3 clips from 3 different guest folders ───────────────────────────
+  // ── Get folder rotation index (persisted across scans) ────────────────────
+  const { data: rotRow } = await supabase
+    .from("agent_config")
+    .select("value")
+    .eq("key", "folder_rotation_index")
+    .maybeSingle();
+  let rotationIndex: number = (rotRow?.value as number) ?? 0;
+
+  // ── List all guest subfolders + their unposted clips (parallel) ───────────
   const subfolders = await listGuestSubfolders(driveToken);
   if (subfolders.length < 3) {
     return NextResponse.json({
-      error: `Not enough guest folders found in Drive. Found ${subfolders.length}, need at least 3.`,
+      error: `Not enough guest folders in Drive. Found ${subfolders.length}, need ≥3.`,
     }, { status: 422 });
   }
 
-  const picks = await pickRandomClips(subfolders, 3, postedIds, driveToken);
-  if (picks.length < 3) {
-    return NextResponse.json({
-      error: `Not enough unposted clips across different guests. Found ${picks.length}/3.`,
-    }, { status: 422 });
+  const folderClipLists = await Promise.all(
+    subfolders.map(async (folder) => {
+      const clips = await listClipsInFolder(folder.id, driveToken);
+      return { folder, clips: clips.filter((c) => !postedIds.includes(c.id)) };
+    })
+  );
+  const foldersWithContent = folderClipLists.filter((f) => f.clips.length > 0);
+
+  // ── Build full round-robin queue ──────────────────────────────────────────
+  const fullQueue: Array<{ folderName: string; file: DriveFile; folderId: string }> = [];
+  const maxRounds = Math.max(...foldersWithContent.map((f) => f.clips.length));
+  for (let round = 0; round < maxRounds; round++) {
+    for (const { folder, clips } of foldersWithContent) {
+      if (round < clips.length) {
+        fullQueue.push({ folderName: folder.name, file: clips[round], folderId: folder.id });
+      }
+    }
   }
+
+  if (fullQueue.length === 0) {
+    return NextResponse.json({ error: "No unposted clips available" }, { status: 422 });
+  }
+
+  // ── Compute posting schedule for the coming week ──────────────────────────
+  // 3 posts per posting day (Mon–Sat), 9am / 2pm / 7pm EDT
+  const POSTING_HOURS_UTC = [13, 18, 23];
+  const nextMonday = new Date();
+  nextMonday.setUTCHours(0, 0, 0, 0);
+  const dow = nextMonday.getUTCDay();
+  const daysToMon = dow === 0 ? 1 : (8 - dow) % 7 || 7;
+  nextMonday.setUTCDate(nextMonday.getUTCDate() + daysToMon);
+
+  // Mon–Sat = offsets 0,1,2,3,4,5
+  const weekSlots: string[] = [];
+  for (let d = 0; d < 6; d++) {
+    for (const hour of POSTING_HOURS_UTC) {
+      const dt = new Date(nextMonday);
+      dt.setUTCDate(nextMonday.getUTCDate() + d);
+      dt.setUTCHours(hour, 0, 0, 0);
+      weekSlots.push(dt.toISOString());
+    }
+  }
+  // weekSlots has 18 entries (6 days × 3 times)
 
   // ── Load voice profile ────────────────────────────────────────────────────
   const { data: profile } = await supabase
@@ -96,23 +130,31 @@ async function runScan(req: NextRequest) {
     .limit(1)
     .maybeSingle();
 
-  // ── Generate captions + build post rows ──────────────────────────────────
-  const weekGroupId = `${weekPattern}-${scheduledTimes[0].slice(0, 10)}`;
+  // ── Build posts: pick next 18 clips from rotation queue ──────────────────
+  // Only generate captions for first 3 to stay within 60s budget;
+  // remainder get captions_json:{} and can be generated via Schedule page.
+  const weekGroupId = `week-${nextMonday.toISOString().slice(0, 10)}`;
   const postsToInsert = [];
+  const approvalToken = randomUUID(); // shared per batch for simplicity
 
-  for (let i = 0; i < picks.length; i++) {
-    const { file, folderName } = picks[i];
-    const captions = await generateCaptions(anthropic, profile, file.name, folderName);
-    const proxyUrl = `${APP_URL}/api/drive-proxy/${file.id}`;
-    const approvalToken = randomUUID();
+  for (let i = 0; i < weekSlots.length; i++) {
+    const queuePos = (rotationIndex + i) % fullQueue.length;
+    const { folderName, file } = fullQueue[queuePos];
+
+    // Generate captions for the first 3 posts only (time budget)
+    let captions: { instagram: string; tiktok: string; youtube: string } =
+      { instagram: "", tiktok: "", youtube: "" };
+    if (i < 3) {
+      captions = await generateCaptions(anthropic, profile, file.name, folderName);
+    }
 
     postsToInsert.push({
-      title: file.name.replace(/\.[^.]+$/, ""), // strip file extension
+      title: file.name.replace(/\.[^.]+$/, ""),
       description: `Guest: ${folderName}`,
       platforms: ["instagram", "tiktok", "youtube"],
-      status: "pending_approval",
-      scheduled_at: scheduledTimes[i],
-      content_url: proxyUrl,
+      status: "scheduled",
+      scheduled_at: weekSlots[i],
+      content_url: `${APP_URL}/api/drive-proxy/${file.id}`,
       drive_file_id: file.id,
       approval_token: approvalToken,
       week_group_id: weekGroupId,
@@ -134,20 +176,25 @@ async function runScan(req: NextRequest) {
     return NextResponse.json({ error: insertErr?.message || "Insert failed" }, { status: 500 });
   }
 
-  // ── Send approval email ───────────────────────────────────────────────────
-  await sendApprovalEmail(inserted, weekGroupId, weekPattern, scheduledTimes);
-
-  // ── Flip week pattern for next Sunday ────────────────────────────────────
-  await flipWeekPattern(supabase);
+  // ── Persist new rotation index ────────────────────────────────────────────
+  const newIndex = (rotationIndex + weekSlots.length) % fullQueue.length;
+  await supabase
+    .from("agent_config")
+    .upsert({ key: "folder_rotation_index", value: newIndex })
+    .eq("key", "folder_rotation_index");
 
   return NextResponse.json({
     success: true,
-    weekPattern,
-    nextWeekPattern: weekPattern === "A" ? "B" : "A",
     postsCreated: inserted.length,
     weekGroupId,
-    scheduledTimes,
-    clips: picks.map((p) => ({ name: p.file.name, guest: p.folderName })),
+    foldersUsed: foldersWithContent.length,
+    rotationIndexStart: rotationIndex,
+    rotationIndexNext: newIndex,
+    clips: postsToInsert.map((p) => ({
+      title: p.title,
+      guest: (p.description as string).replace("Guest: ", ""),
+      when: p.scheduled_at,
+    })),
   });
 }
 
