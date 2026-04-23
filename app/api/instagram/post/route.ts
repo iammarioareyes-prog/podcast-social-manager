@@ -81,9 +81,9 @@ export async function POST(req: NextRequest) {
     // Step 2: Poll until container is FINISHED processing
     let statusCode = "IN_PROGRESS";
     let attempts = 0;
-    // Poll every 2.5s up to 18 times (45s max) — keeps total fn under Vercel 60s limit
-    while (statusCode === "IN_PROGRESS" && attempts < 18) {
-      await new Promise((r) => setTimeout(r, 2500));
+    // Poll every 3s up to 10 times (30s max) — sub-function must complete well under 60s
+    while (statusCode === "IN_PROGRESS" && attempts < 10) {
+      await new Promise((r) => setTimeout(r, 3000));
       const statusRes = await fetch(
         `${GRAPH}/${containerId}?fields=status_code&access_token=${token}`
       );

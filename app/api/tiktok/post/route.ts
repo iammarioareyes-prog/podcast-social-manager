@@ -136,13 +136,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Step 2: Poll publish status (TikTok processes video asynchronously)
+    // 4s × 8 = 32s max — keeps sub-function well under 60s limit
     let publishStatus = "PROCESSING_UPLOAD";
     let attempts = 0;
     while (
       (publishStatus === "PROCESSING_UPLOAD" || publishStatus === "PROCESSING_DOWNLOAD") &&
-      attempts < 12
+      attempts < 8
     ) {
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, 4000));
       const statusRes = await fetch(`${TIKTOK_API}/post/publish/status/fetch/`, {
         method: "POST",
         headers: {

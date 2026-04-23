@@ -115,12 +115,19 @@ export async function GET() {
 }
 
 async function callPlatform(url: string, body: Record<string, unknown>): Promise<Record<string, string>> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 50_000); // 50s hard limit
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
