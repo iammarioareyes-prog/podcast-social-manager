@@ -32,9 +32,20 @@ async function runAgent(req: NextRequest) {
   }
 
   const supabase = createAgentSupabaseClient();
+  const now = new Date();
+
+  // ── Unstuck posts that got claimed but never finished ────────────────────
+  // If a previous cron timed out it may have left posts in "publishing".
+  // Reset any that have been stuck for more than 6 minutes so this run can
+  // pick them up (they'll be inside the ±10 min window if we're close).
+  const staleThreshold = new Date(now.getTime() - 6 * 60 * 1000).toISOString();
+  await supabase
+    .from("posts")
+    .update({ status: "scheduled", updated_at: now.toISOString() })
+    .eq("status", "publishing")
+    .lt("updated_at", staleThreshold);
 
   // ── Find scheduled posts due within ±10 minutes of now ──────────────────
-  const now = new Date();
   const windowStart = new Date(now.getTime() - 10 * 60 * 1000);
   const windowEnd   = new Date(now.getTime() + 10 * 60 * 1000);
 
@@ -91,6 +102,7 @@ async function runAgent(req: NextRequest) {
         description: captions.youtube || post.description || "",
         tags: post.hashtags || [],
         videoUrl,
+        driveFileId: post.drive_file_id || undefined,
       }),
     ]);
 

@@ -71,34 +71,44 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "YouTube not connected" }, { status: 401 });
     }
 
-    // Refresh token if expired
+    // Refresh token if expired (also refresh proactively if we have a refresh_token)
     let token = conn.access_token;
-    if (conn.token_expires_at) {
-      const expiresAt = new Date(conn.token_expires_at).getTime();
-      if (Date.now() > expiresAt - 60000 && conn.refresh_token) {
+    if (conn.refresh_token) {
+      const expiresAt = conn.token_expires_at
+        ? new Date(conn.token_expires_at).getTime()
+        : 0;
+      if (Date.now() > expiresAt - 120_000) {
         const refreshed = await refreshYouTubeToken(conn.refresh_token);
         if (refreshed) token = refreshed;
       }
     }
 
+    // Get Google Drive token early — used for fetching the video file
+    const { data: driveConn } = await supabase
+      .from("platform_connections")
+      .select("access_token")
+      .eq("platform", "google_drive")
+      .single();
+    const driveToken = driveConn?.access_token || token;
+
     // Resolve the video source URL
-    // If a Google Drive file ID is provided, get a direct download link
+    // If a Google Drive file ID is provided, use Drive API directly (faster, no proxy hop)
     let sourceUrl = videoUrl;
     let contentLength: number | undefined;
     let contentType = "video/mp4";
 
     if (driveFileId) {
-      // Get Drive file metadata
+      // Fetch file metadata using Drive token (not YouTube token)
       const metaRes = await fetch(
         `https://www.googleapis.com/drive/v3/files/${driveFileId}?fields=size,mimeType,name`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${driveToken}` } }
       );
       if (metaRes.ok) {
         const meta = await metaRes.json();
         contentLength = meta.size ? parseInt(meta.size) : undefined;
         contentType = meta.mimeType || "video/mp4";
       }
-      // Use the Drive download URL
+      // Bypass drive-proxy — fetch directly from Drive API
       sourceUrl = `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`;
     }
 
@@ -168,15 +178,6 @@ export async function POST(req: NextRequest) {
     }
 
     // Step 2: Fetch the video bytes and stream to YouTube
-    // Determine the access token for Drive (same Google account)
-    const { data: driveConn } = await supabase
-      .from("platform_connections")
-      .select("access_token")
-      .eq("platform", "google_drive")
-      .single();
-
-    const driveToken = driveConn?.access_token || token;
-
     const videoRes = await fetch(sourceUrl, {
       headers: driveFileId
         ? { Authorization: `Bearer ${driveToken}` }

@@ -76,6 +76,7 @@ export async function GET() {
         description: captions.youtube || post.description || "",
         tags: post.hashtags || [],
         videoUrl,
+        driveFileId: post.drive_file_id || undefined,
       }),
     ]);
 
