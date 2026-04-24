@@ -9,17 +9,18 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://iamm-podcast-mgr-v1.
 /**
  * GET /api/admin/post-now
  *
- * One-shot admin endpoint: finds ALL scheduled posts for today that haven't
- * been published yet (regardless of scheduled_at time) and posts them now.
+ * One-shot admin endpoint: finds ALL scheduled/stuck posts for today that
+ * haven't been published yet and posts them all IN PARALLEL so the total
+ * execution time is bounded by the slowest single post, not post count × time.
  */
 export async function GET() {
-
   const supabase = createAgentSupabaseClient();
+  const now = new Date();
 
-  // Find all scheduled posts for today (UTC) — no time-window restriction
-  const todayStart = new Date();
+  // Find all scheduled/stuck posts for today (UTC)
+  const todayStart = new Date(now);
   todayStart.setUTCHours(0, 0, 0, 0);
-  const todayEnd = new Date();
+  const todayEnd = new Date(now);
   todayEnd.setUTCHours(23, 59, 59, 999);
 
   const { data: posts, error } = await supabase
@@ -35,89 +36,95 @@ export async function GET() {
   }
 
   if (!posts || posts.length === 0) {
-    return NextResponse.json({ success: true, posted: 0, message: "No unposted scheduled posts found for today" });
+    return NextResponse.json({
+      success: true,
+      posted: 0,
+      message: "No unposted scheduled posts found for today",
+    });
   }
 
-  const now = new Date();
+  // Claim all posts atomically before any posting begins
   const postIds = posts.map((p) => p.id);
-
-  // Claim them
   await supabase
     .from("posts")
     .update({ status: "publishing", updated_at: now.toISOString() })
     .in("id", postIds);
 
-  const results = [];
+  // ── Post ALL posts in parallel ────────────────────────────────────────────
+  // Total time = max(individual post time) rather than sum.
+  const postResults = await Promise.allSettled(
+    posts.map(async (post) => {
+      const captions = (post.captions_json as Record<string, string>) || {};
+      const videoUrl = post.content_url;
 
-  for (const post of posts) {
-    const captions = (post.captions_json as Record<string, string>) || {};
-    const videoUrl = post.content_url;
+      if (!videoUrl) {
+        await supabase.from("posts").update({ status: "failed" }).eq("id", post.id);
+        return { postId: post.id, title: post.title, error: "No content_url" };
+      }
 
-    if (!videoUrl) {
-      await supabase.from("posts").update({ status: "failed" }).eq("id", post.id);
-      results.push({ postId: post.id, title: post.title, error: "No content_url" });
-      continue;
-    }
+      const [igRes, ttRes, ytRes] = await Promise.allSettled([
+        callPlatform(`${APP_URL}/api/instagram/post`, {
+          postId: post.id,
+          caption: captions.instagram || post.caption || post.title,
+          videoUrl,
+        }),
+        callPlatform(`${APP_URL}/api/tiktok/post`, {
+          postId: post.id,
+          title: captions.tiktok || post.title,
+          videoUrl,
+        }),
+        callPlatform(`${APP_URL}/api/youtube/upload`, {
+          postId: post.id,
+          title: post.title,
+          description: captions.youtube || post.description || "",
+          tags: post.hashtags || [],
+          videoUrl,
+          driveFileId: post.drive_file_id || undefined,
+        }),
+      ]);
 
-    const [igRes, ttRes, ytRes] = await Promise.allSettled([
-      callPlatform(`${APP_URL}/api/instagram/post`, {
-        postId: post.id,
-        caption: captions.instagram || post.caption || post.title,
-        videoUrl,
-      }),
-      callPlatform(`${APP_URL}/api/tiktok/post`, {
-        postId: post.id,
-        title: captions.tiktok || post.title,
-        videoUrl,
-      }),
-      callPlatform(`${APP_URL}/api/youtube/upload`, {
+      const platformPostIds: Record<string, string> = {};
+      if (igRes.status === "fulfilled" && igRes.value.mediaId)   platformPostIds.instagram = igRes.value.mediaId;
+      if (ttRes.status === "fulfilled" && ttRes.value.publishId)  platformPostIds.tiktok   = ttRes.value.publishId;
+      if (ytRes.status === "fulfilled" && ytRes.value.videoId)   platformPostIds.youtube   = ytRes.value.videoId;
+
+      const succeeded = [igRes, ttRes, ytRes].filter((r) => r.status === "fulfilled").length;
+      const newStatus = succeeded === 0 ? "failed" : "published";
+
+      await supabase.from("posts").update({
+        status: newStatus,
+        published_at: succeeded > 0 ? now.toISOString() : null,
+        platform_post_ids: platformPostIds,
+        updated_at: now.toISOString(),
+      }).eq("id", post.id);
+
+      if (post.drive_file_id && succeeded > 0) {
+        await markDriveIdsAsPosted(supabase, [post.drive_file_id]);
+      }
+
+      return {
         postId: post.id,
         title: post.title,
-        description: captions.youtube || post.description || "",
-        tags: post.hashtags || [],
-        videoUrl,
-        driveFileId: post.drive_file_id || undefined,
-      }),
-    ]);
+        status: newStatus,
+        platformResults: {
+          instagram: igRes.status === "fulfilled" ? "ok" : (igRes as PromiseRejectedResult).reason?.message || "failed",
+          tiktok:    ttRes.status === "fulfilled" ? "ok" : (ttRes as PromiseRejectedResult).reason?.message || "failed",
+          youtube:   ytRes.status === "fulfilled" ? "ok" : (ytRes as PromiseRejectedResult).reason?.message || "failed",
+        },
+      };
+    })
+  );
 
-    const platformPostIds: Record<string, string> = {};
-    if (igRes.status === "fulfilled" && igRes.value.mediaId)  platformPostIds.instagram = igRes.value.mediaId;
-    if (ttRes.status === "fulfilled" && ttRes.value.publishId) platformPostIds.tiktok   = ttRes.value.publishId;
-    if (ytRes.status === "fulfilled" && ytRes.value.videoId)  platformPostIds.youtube   = ytRes.value.videoId;
+  const results = postResults.map((r) =>
+    r.status === "fulfilled" ? r.value : { error: r.reason?.message }
+  );
 
-    const succeeded = [igRes, ttRes, ytRes].filter((r) => r.status === "fulfilled").length;
-    const failed    = [igRes, ttRes, ytRes].filter((r) => r.status === "rejected").length;
-    const newStatus = failed === 3 ? "failed" : "published";
-
-    await supabase.from("posts").update({
-      status: newStatus,
-      published_at: succeeded > 0 ? now.toISOString() : null,
-      platform_post_ids: platformPostIds,
-      updated_at: now.toISOString(),
-    }).eq("id", post.id);
-
-    if (post.drive_file_id && succeeded > 0) {
-      await markDriveIdsAsPosted(supabase, [post.drive_file_id]);
-    }
-
-    results.push({
-      postId: post.id,
-      title: post.title,
-      status: newStatus,
-      platformResults: {
-        instagram: igRes.status === "fulfilled" ? "ok" : (igRes as PromiseRejectedResult).reason?.message || "failed",
-        tiktok:    ttRes.status === "fulfilled" ? "ok" : (ttRes as PromiseRejectedResult).reason?.message || "failed",
-        youtube:   ytRes.status === "fulfilled" ? "ok" : (ytRes as PromiseRejectedResult).reason?.message || "failed",
-      },
-    });
-  }
-
-  return NextResponse.json({ success: true, posted: results.length, results });
+  return NextResponse.json({ success: true, posted: posts.length, results });
 }
 
 async function callPlatform(url: string, body: Record<string, unknown>): Promise<Record<string, string>> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 50_000); // 50s hard limit
+  const timeout = setTimeout(() => controller.abort(), 50_000); // 50s hard limit per platform
   try {
     const res = await fetch(url, {
       method: "POST",

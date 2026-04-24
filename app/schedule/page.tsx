@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, X, Send, Loader2 } from "lucide-react";
+import { Plus, X, Send, Loader2, Zap } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { PostCreator } from "@/components/schedule/post-creator";
 import { CalendarView } from "@/components/schedule/calendar-view";
@@ -14,6 +14,7 @@ export default function SchedulePage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [isPostingToday, setIsPostingToday] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
@@ -120,6 +121,7 @@ export default function SchedulePage() {
               description: captions.youtube || post.description || post.caption || "",
               tags: post.hashtags ?? [],
               videoUrl: post.content_url,
+              driveFileId: post.drive_file_id || undefined,
             };
           }
 
@@ -154,12 +156,50 @@ export default function SchedulePage() {
     }
   };
 
+  const handlePostToday = async () => {
+    setIsPostingToday(true);
+    try {
+      const res = await fetch("/api/admin/post-now");
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || "Failed to post today's content", "error");
+      } else if (data.posted === 0) {
+        showToast("No scheduled posts found for today");
+      } else {
+        const ok = data.results?.filter((r: { status?: string }) => r.status === "published").length ?? 0;
+        showToast(`Posted ${ok}/${data.posted} posts successfully`);
+      }
+      await loadPosts();
+    } catch {
+      showToast("Request timed out — posts may still be uploading in the background", "error");
+      await loadPosts();
+    } finally {
+      setIsPostingToday(false);
+    }
+  };
+
+  const now = new Date();
+
+  // Posts scheduled for today that are overdue (past their time) and not yet published
+  const todayOverduePosts = posts
+    .filter(
+      (p) =>
+        (p.status === "scheduled" || p.status === "publishing") &&
+        p.scheduled_at &&
+        new Date(p.scheduled_at) <= now &&
+        new Date(p.scheduled_at).toDateString() === now.toDateString()
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime()
+    );
+
   const upcomingPosts = posts
     .filter(
       (p) =>
         p.status === "scheduled" &&
         p.scheduled_at &&
-        new Date(p.scheduled_at) > new Date()
+        new Date(p.scheduled_at) > now
     )
     .sort(
       (a, b) =>
@@ -198,10 +238,25 @@ export default function SchedulePage() {
                 : `${posts.filter((p) => p.status === "scheduled").length} upcoming posts`}
             </p>
           </div>
-          <Button onClick={() => setShowCreator(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            New Post
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={handlePostToday}
+              disabled={isPostingToday}
+              className="gap-2"
+            >
+              {isPostingToday ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4" />
+              )}
+              {isPostingToday ? "Posting…" : "Post Today"}
+            </Button>
+            <Button onClick={() => setShowCreator(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              New Post
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
@@ -212,6 +267,39 @@ export default function SchedulePage() {
 
           {/* Sidebar */}
           <div className="xl:col-span-1 space-y-4">
+            {/* Today's overdue posts — visible and actionable */}
+            {todayOverduePosts.length > 0 && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5">
+                <div className="border-b border-amber-500/20 p-4 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-amber-400">Today — Needs Posting</h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs gap-1 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                    onClick={handlePostToday}
+                    disabled={isPostingToday}
+                  >
+                    {isPostingToday ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Zap className="h-3 w-3" />
+                    )}
+                    Post All
+                  </Button>
+                </div>
+                <div className="divide-y divide-border">
+                  {todayOverduePosts.map((post) => (
+                    <PostSidebarRow
+                      key={post.id}
+                      post={post}
+                      isPublishing={publishingId === post.id}
+                      onPublish={() => handlePublishNow(post)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Upcoming Posts */}
             <div className="rounded-lg border border-border bg-card">
               <div className="border-b border-border p-4">

@@ -16,6 +16,7 @@ export interface Post {
   scheduled_at?: string;
   published_at?: string;
   content_url?: string;
+  drive_file_id?: string;
   thumbnail_url?: string;
   platform_post_ids: Record<string, string>;
   captions_json?: Record<string, string>;
