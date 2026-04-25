@@ -211,9 +211,7 @@ async function generateCaptions(
   const igTagsStr = igTags.map((t: string) => `@${t.replace("@", "")}`).join(" ");
   const voiceSummary = (profile?.voice_summary as string) || "";
   const voiceExamples = (profile?.voice_examples as string[]) || [];
-  const igHashtags = (profile?.ig_hashtags as string[]) || [];
-  const tiktokHashtags = (profile?.tiktok_hashtags as string[]) || [];
-  const youtubeHashtags = (profile?.youtube_hashtags as string[]) || [];
+  // Hashtags are NOT passed to Claude — they are appended at post time from voice_profile
   const podcastName = (profile?.podcast_name as string) || "I Am Mario Areyes";
 
   const voiceContext = voiceSummary ? `\n\nVoice & Style: ${voiceSummary}` : "";
@@ -228,17 +226,17 @@ Guest/Episode: "${guestName}"
 
 Write captions for 3 platforms:
 
-Instagram Reels: Compelling caption. End with EXACTLY: "${igTagsStr}" then hashtags. 10-15 hashtags.${igHashtags.length ? ` Use: ${igHashtags.join(", ")}` : ""}
+Instagram Reels: Compelling caption. End with EXACTLY: "${igTagsStr}". Do NOT include any hashtags — hashtags are added automatically at post time.
 
-TikTok: Punchy hook-driven caption under 150 chars. 3-5 hashtags.${tiktokHashtags.length ? ` Use: ${tiktokHashtags.join(", ")}` : ""}
+TikTok: Punchy hook-driven caption under 150 chars. Do NOT include any hashtags.
 
-YouTube Shorts: Engaging caption 150-300 chars with CTA. 3-5 hashtags.${youtubeHashtags.length ? ` Use: ${youtubeHashtags.join(", ")}` : ""}
+YouTube Shorts: Engaging caption 150-300 chars with CTA. Do NOT include any hashtags.
 
-Return JSON only, no extra text:
+Return JSON only, no extra text — caption text only, no hashtags anywhere:
 {
-  "instagram": "full caption with tags and hashtags",
-  "tiktok": "full caption with hashtags",
-  "youtube": "full caption with hashtags"
+  "instagram": "caption text only, no hashtags",
+  "tiktok": "caption text only, no hashtags",
+  "youtube": "caption text only, no hashtags"
 }`;
 
   const message = await anthropic.messages.create({

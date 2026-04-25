@@ -92,12 +92,11 @@ export function PostCreator({ onSubmit }: PostCreatorProps) {
       const captions: CaptionData[] = data.captions || [];
       setGeneratedCaptions(captions);
 
-      // Auto-save all platform captions to captions_json
+      // Auto-save all platform captions to captions_json — caption text only, no hashtags
+      // (Hashtags are appended at post time from the brand settings in voice_profile)
       const captionsJson: Record<string, string> = {};
       for (const c of captions) {
-        captionsJson[c.platform] = c.hashtags.length
-          ? `${c.caption}\n\n${c.hashtags.map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" ")}`
-          : c.caption;
+        captionsJson[c.platform] = c.caption;
       }
       setFormData((prev) => ({ ...prev, captions_json: captionsJson }));
 
