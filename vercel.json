@@ -5,7 +5,7 @@
   "installCommand": "npm install",
   "crons": [
     {
-      "path": "/api/agent/run",
+      "path": "/api/admin/post-now",
       "schedule": "0 13,18,23 * * 1-6"
     },
     {
