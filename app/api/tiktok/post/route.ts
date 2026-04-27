@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
       postId,
       title,
       videoUrl,
+      driveFileId,
       privacyLevel = "SELF_ONLY",
       disableDuet = false,
       disableComment = false,
@@ -73,6 +74,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Resolve the video URL — prefer direct Drive download over proxy
+    let finalVideoUrl = videoUrl;
+    if (driveFileId) {
+      const { data: driveConn } = await supabase
+        .from("platform_connections")
+        .select("access_token")
+        .eq("platform", "google_drive")
+        .single();
+      if (driveConn?.access_token) {
+        finalVideoUrl = `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media&access_token=${encodeURIComponent(driveConn.access_token)}`;
+      }
+    }
+
     // Append brand hashtags from voice_profile settings
     const { data: vpData } = await supabase
       .from("voice_profile")
@@ -106,7 +120,7 @@ export async function POST(req: NextRequest) {
         },
         source_info: {
           source: "PULL_FROM_URL",
-          video_url: videoUrl,
+          video_url: finalVideoUrl,
         },
       }),
     });

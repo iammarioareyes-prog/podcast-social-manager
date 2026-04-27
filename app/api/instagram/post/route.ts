@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
   try {
-    const { postId, caption, videoUrl, coverUrl } = await req.json();
+    const { postId, caption, videoUrl, coverUrl, driveFileId } = await req.json();
 
     if (!caption || !videoUrl) {
       return NextResponse.json({ error: "caption and videoUrl are required" }, { status: 400 });
@@ -36,6 +36,21 @@ export async function POST(req: NextRequest) {
 
     const token = conn.access_token;
 
+    // Resolve the video URL — prefer direct Drive download over proxy
+    // Instagram's CDN needs to pull from a fast, reliable URL.
+    // Direct Drive URL (with access token) is much faster than streaming through the proxy.
+    let finalVideoUrl = videoUrl;
+    if (driveFileId) {
+      const { data: driveConn } = await supabase
+        .from("platform_connections")
+        .select("access_token")
+        .eq("platform", "google_drive")
+        .single();
+      if (driveConn?.access_token) {
+        finalVideoUrl = `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media&access_token=${encodeURIComponent(driveConn.access_token)}`;
+      }
+    }
+
     // Append brand hashtags from voice_profile settings
     let finalCaption = caption;
     const { data: vpData } = await supabase
@@ -55,7 +70,7 @@ export async function POST(req: NextRequest) {
     // Step 1: Create media container
     const containerParams = new URLSearchParams({
       media_type: "REELS",
-      video_url: videoUrl,
+      video_url: finalVideoUrl,
       caption: finalCaption,
       access_token: token,
     });

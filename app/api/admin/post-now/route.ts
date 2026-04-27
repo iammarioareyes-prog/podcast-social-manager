@@ -75,11 +75,13 @@ export async function GET() {
           postId: post.id,
           caption: captions.instagram || post.caption || post.title,
           videoUrl,
+          driveFileId: post.drive_file_id || undefined,
         }),
         callPlatform(`${APP_URL}/api/tiktok/post`, {
           postId: post.id,
           title: captions.tiktok || post.title,
           videoUrl,
+          driveFileId: post.drive_file_id || undefined,
         }),
         callPlatform(`${APP_URL}/api/youtube/upload`, {
           postId: post.id,
