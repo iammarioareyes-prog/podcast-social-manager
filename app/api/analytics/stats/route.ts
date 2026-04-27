@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const GRAPH = "https://graph.facebook.com/v19.0";
 
@@ -17,7 +12,7 @@ async function getFreshYouTubeToken(conn: {
   access_token: string;
   refresh_token?: string;
   token_expires_at?: string;
-}): Promise<string> {
+}, supabase: SupabaseClient): Promise<string> {
   // If token hasn't expired yet (with 2-min buffer), use it as-is
   if (conn.token_expires_at) {
     const expiresAt = new Date(conn.token_expires_at).getTime();
@@ -61,7 +56,7 @@ async function getFreshTikTokToken(conn: {
   access_token: string;
   refresh_token?: string;
   token_expires_at?: string;
-}): Promise<string> {
+}, supabase: SupabaseClient): Promise<string> {
   if (conn.token_expires_at) {
     const expiresAt = new Date(conn.token_expires_at).getTime();
     if (Date.now() < expiresAt - 120_000) return conn.access_token;
@@ -104,6 +99,10 @@ async function getFreshTikTokToken(conn: {
 // ── Main handler ───────────────────────────────────────────────────────────
 
 export async function GET() {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
   const stats = {
     instagram: { followers: 0, posts: 0, reach: 0, engagement: 0, connected: false, error: "" },
     youtube:   { subscribers: 0, views: 0, videos: 0, engagement: 0, connected: false, error: "" },
@@ -161,7 +160,7 @@ export async function GET() {
   const yt = byPlatform["youtube"];
   if (yt?.access_token) {
     try {
-      const token = await getFreshYouTubeToken(yt);
+      const token = await getFreshYouTubeToken(yt, supabase);
 
       // Channel-level stats + uploads playlist ID
       const res = await fetch(
@@ -215,7 +214,7 @@ export async function GET() {
   const tt = byPlatform["tiktok"];
   if (tt?.access_token) {
     try {
-      const token = await getFreshTikTokToken(tt);
+      const token = await getFreshTikTokToken(tt, supabase);
       const res = await fetch(
         "https://open.tiktokapis.com/v2/user/info/?fields=follower_count,following_count,likes_count,video_count",
         { headers: { Authorization: `Bearer ${token}` } }

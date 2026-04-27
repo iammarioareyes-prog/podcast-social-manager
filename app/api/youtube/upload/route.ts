@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-async function refreshYouTubeToken(refreshToken: string): Promise<string | null> {
+async function refreshYouTubeToken(refreshToken: string, supabase: SupabaseClient): Promise<string | null> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -37,6 +32,10 @@ async function refreshYouTubeToken(refreshToken: string): Promise<string | null>
 }
 
 export async function POST(req: NextRequest) {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
   try {
     const {
       postId,
@@ -78,7 +77,7 @@ export async function POST(req: NextRequest) {
         ? new Date(conn.token_expires_at).getTime()
         : 0;
       if (Date.now() > expiresAt - 120_000) {
-        const refreshed = await refreshYouTubeToken(conn.refresh_token);
+        const refreshed = await refreshYouTubeToken(conn.refresh_token, supabase);
         if (refreshed) token = refreshed;
       }
     }
