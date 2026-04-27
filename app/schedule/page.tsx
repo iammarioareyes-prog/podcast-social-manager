@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, X, Send, Loader2, Zap } from "lucide-react";
+import { Plus, X, Send, Loader2, Zap, Trash2 } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { PostCreator } from "@/components/schedule/post-creator";
 import { CalendarView } from "@/components/schedule/calendar-view";
@@ -15,6 +15,8 @@ export default function SchedulePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [isPostingToday, setIsPostingToday] = useState(false);
+  const [isClearingQueue, setIsClearingQueue] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
@@ -178,6 +180,25 @@ export default function SchedulePage() {
     }
   };
 
+  const handleClearQueue = async () => {
+    setShowClearConfirm(false);
+    setIsClearingQueue(true);
+    try {
+      const res = await fetch("/api/admin/clear-schedule", { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || "Failed to clear queue", "error");
+      } else {
+        showToast(`Cleared ${data.deleted} scheduled post${data.deleted !== 1 ? "s" : ""} from the queue`);
+      }
+      await loadPosts();
+    } catch {
+      showToast("Failed to clear queue", "error");
+    } finally {
+      setIsClearingQueue(false);
+    }
+  };
+
   const now = new Date();
 
   // Posts scheduled for today that are overdue (past their time) and not yet published
@@ -239,6 +260,19 @@ export default function SchedulePage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowClearConfirm(true)}
+              disabled={isClearingQueue}
+              className="gap-2 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            >
+              {isClearingQueue ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              {isClearingQueue ? "Clearing…" : "Clear Queue"}
+            </Button>
             <Button
               variant="outline"
               onClick={handlePostToday}
@@ -343,6 +377,29 @@ export default function SchedulePage() {
           </div>
         </div>
       </div>
+
+      {/* Clear Queue Confirmation */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-xl">
+            <h2 className="text-base font-semibold text-foreground">Clear scheduled queue?</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This will permanently delete all <strong>scheduled</strong> posts. Published and failed posts are kept. This cannot be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setShowClearConfirm(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleClearQueue}
+              >
+                Yes, clear queue
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Post Creator Modal */}
       {showCreator && (
