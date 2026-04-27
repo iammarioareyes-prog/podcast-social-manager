@@ -6,15 +6,21 @@ export const dynamic = "force-dynamic";
 /**
  * DELETE /api/admin/clear-schedule
  *
- * Deletes all posts with status "scheduled" (not published or failed).
- * Used to wipe the queue before manually building out a week's schedule.
+ * Deletes all posts with status "scheduled".
+ * Published and failed posts are preserved.
  */
 export async function DELETE() {
   const supabase = createAgentSupabaseClient();
 
-  const { count, error } = await supabase
+  // Count first so we can return how many were deleted
+  const { count } = await supabase
     .from("posts")
-    .delete({ count: "exact" })
+    .select("*", { count: "exact", head: true })
+    .eq("status", "scheduled");
+
+  const { error } = await supabase
+    .from("posts")
+    .delete()
     .eq("status", "scheduled");
 
   if (error) {
