@@ -131,7 +131,7 @@ export async function GET() {
     const day = new Date(safeDeleteFrom);
     day.setUTCDate(safeDeleteFrom.getUTCDate() + calOffset);
 
-    if (day.getUTCDay() === 0) continue; // skip Sunday
+    // Post every day of the week — no skip
 
     const group = dailyGroups[dayGroupIdx++];
 

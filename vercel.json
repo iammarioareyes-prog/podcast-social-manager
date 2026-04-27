@@ -6,7 +6,7 @@
   "crons": [
     {
       "path": "/api/admin/post-now",
-      "schedule": "0 13,18,23 * * 1-6"
+      "schedule": "0 13,18,23 * * *"
     },
     {
       "path": "/api/agent/scan",

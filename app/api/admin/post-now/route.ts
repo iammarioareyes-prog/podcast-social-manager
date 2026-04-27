@@ -23,6 +23,14 @@ export async function GET() {
   const todayEnd = new Date(now);
   todayEnd.setUTCHours(23, 59, 59, 999);
 
+  // Reset today's failed posts back to scheduled so they get retried
+  await supabase
+    .from("posts")
+    .update({ status: "scheduled", updated_at: now.toISOString() })
+    .eq("status", "failed")
+    .gte("scheduled_at", todayStart.toISOString())
+    .lte("scheduled_at", todayEnd.toISOString());
+
   const { data: posts, error } = await supabase
     .from("posts")
     .select("*")
