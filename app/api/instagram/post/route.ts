@@ -12,10 +12,12 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
   try {
-    const { postId, caption, videoUrl, coverUrl, driveFileId } = await req.json();
+    const { postId, caption, videoUrl } = await req.json();
 
-    if (!caption || !videoUrl) {
-      return NextResponse.json({ error: "caption and videoUrl are required" }, { status: 400 });
+    // caption must be a non-empty string; videoUrl is the drive-proxy URL
+    const effectiveCaption = caption || "";
+    if (!videoUrl) {
+      return NextResponse.json({ error: "videoUrl is required" }, { status: 400 });
     }
 
     const { data: conn } = await supabase
@@ -36,55 +38,8 @@ export async function POST(req: NextRequest) {
 
     const token = conn.access_token;
 
-    // Resolve the video URL — prefer direct Drive download over proxy
-    // Instagram's CDN needs to pull from a fast, reliable URL.
-    // Direct Drive URL (with access token) is much faster than streaming through the proxy.
-    let finalVideoUrl = videoUrl;
-    if (driveFileId) {
-      const { data: driveConn } = await supabase
-        .from("platform_connections")
-        .select("access_token, refresh_token, token_expires_at")
-        .eq("platform", "google_drive")
-        .single();
-      let driveAccessToken = driveConn?.access_token;
-      // Refresh Drive token if expired
-      if (driveConn?.refresh_token) {
-        const driveExpiry = driveConn.token_expires_at
-          ? new Date(driveConn.token_expires_at).getTime()
-          : 0;
-        if (Date.now() > driveExpiry - 120_000) {
-          const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              refresh_token: driveConn.refresh_token,
-              client_id: process.env.GOOGLE_DRIVE_CLIENT_ID!,
-              client_secret: process.env.GOOGLE_DRIVE_CLIENT_SECRET!,
-              grant_type: "refresh_token",
-            }),
-          });
-          const refreshed = await refreshRes.json();
-          if (refreshed.access_token) {
-            driveAccessToken = refreshed.access_token;
-            await supabase
-              .from("platform_connections")
-              .update({
-                access_token: refreshed.access_token,
-                token_expires_at: new Date(
-                  Date.now() + (refreshed.expires_in ?? 3600) * 1000
-                ).toISOString(),
-              })
-              .eq("platform", "google_drive");
-          }
-        }
-      }
-      if (driveAccessToken) {
-        finalVideoUrl = `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media&access_token=${encodeURIComponent(driveAccessToken)}`;
-      }
-    }
-
     // Append brand hashtags from voice_profile settings
-    let finalCaption = caption;
+    let finalCaption = effectiveCaption;
     const { data: vpData } = await supabase
       .from("voice_profile")
       .select("ig_hashtags")
@@ -100,9 +55,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Step 1: Create media container
+    // videoUrl is the drive-proxy URL which issues a 302 redirect to Google Drive.
+    // Instagram's CDN follows the redirect and downloads from Google directly.
     const containerParams = new URLSearchParams({
       media_type: "REELS",
-      video_url: finalVideoUrl,
+      video_url: videoUrl,
       caption: finalCaption,
       access_token: token,
     });

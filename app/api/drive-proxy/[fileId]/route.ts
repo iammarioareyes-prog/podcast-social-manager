@@ -2,15 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAgentSupabaseClient, getDriveAccessToken } from "@/lib/agent-utils";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 /**
  * GET /api/drive-proxy/[fileId]
  *
- * Streams a Google Drive file through this server so Instagram, TikTok,
- * and YouTube can fetch it without needing a Google OAuth token.
- * The URL https://your-app.vercel.app/api/drive-proxy/<fileId> is the
- * public video URL passed to all three posting APIs.
+ * Returns a 302 redirect to the direct Google Drive download URL.
+ * Instagram and TikTok CDNs follow the redirect and download straight
+ * from Google — no Vercel streaming timeout, no large-file issues.
+ * getDriveAccessToken auto-refreshes the token if it's expired.
  */
 export async function GET(
   req: NextRequest,
@@ -23,24 +22,10 @@ export async function GET(
     return NextResponse.json({ error: "Google Drive not connected" }, { status: 401 });
   }
 
-  const driveRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${params.fileId}?alt=media`,
-    { headers: { Authorization: `Bearer ${token}` } }
+  // Redirect Instagram/TikTok CDN directly to Google Drive.
+  // The CDN follows the 302 and downloads from Google without touching Vercel.
+  return NextResponse.redirect(
+    `https://www.googleapis.com/drive/v3/files/${params.fileId}?alt=media&access_token=${token}`,
+    { status: 302 }
   );
-
-  if (!driveRes.ok) {
-    const err = await driveRes.text();
-    console.error("Drive proxy fetch error:", err);
-    return NextResponse.json({ error: "Failed to fetch file from Drive" }, { status: driveRes.status });
-  }
-
-  return new NextResponse(driveRes.body, {
-    status: 200,
-    headers: {
-      "Content-Type": driveRes.headers.get("Content-Type") || "video/mp4",
-      "Content-Length": driveRes.headers.get("Content-Length") || "",
-      "Cache-Control": "public, max-age=3600",
-      "Accept-Ranges": "bytes",
-    },
-  });
 }

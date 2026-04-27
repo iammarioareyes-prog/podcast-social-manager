@@ -65,6 +65,13 @@ export async function GET() {
       const captions = (post.captions_json as Record<string, string>) || {};
       const videoUrl = post.content_url;
 
+      // Build a real caption when the post has none (e.g. focus-week scheduled posts).
+      // post.description holds "Guest: <name>" from focus-week.
+      const guestName = (post.description || "").replace(/^Guest:\s*/i, "").trim();
+      const defaultCaption = guestName
+        ? `${post.title}\n\n${guestName} drops knowledge on the I Am Mario Areyes Podcast. You don't want to miss this one. 🎙️`
+        : post.title;
+
       if (!videoUrl) {
         await supabase.from("posts").update({ status: "failed" }).eq("id", post.id);
         return { postId: post.id, title: post.title, error: "No content_url" };
@@ -73,20 +80,18 @@ export async function GET() {
       const [igRes, ttRes, ytRes] = await Promise.allSettled([
         callPlatform(`${APP_URL}/api/instagram/post`, {
           postId: post.id,
-          caption: captions.instagram || post.caption || post.title,
+          caption: captions.instagram || post.caption || defaultCaption,
           videoUrl,
-          driveFileId: post.drive_file_id || undefined,
         }),
         callPlatform(`${APP_URL}/api/tiktok/post`, {
           postId: post.id,
           title: captions.tiktok || post.title,
           videoUrl,
-          driveFileId: post.drive_file_id || undefined,
         }),
         callPlatform(`${APP_URL}/api/youtube/upload`, {
           postId: post.id,
           title: post.title,
-          description: captions.youtube || post.description || "",
+          description: captions.youtube || post.description || defaultCaption,
           tags: post.hashtags || [],
           videoUrl,
           driveFileId: post.drive_file_id || undefined,
