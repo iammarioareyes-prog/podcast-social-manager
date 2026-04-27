@@ -8,7 +8,7 @@ export async function GET() {
     return NextResponse.json({ error: "TikTok OAuth not configured" }, { status: 500 });
   }
 
-  const scope = "user.info.basic,video.upload";
+  const scope = "user.info.basic,video.publish";
   const state = Math.random().toString(36).substring(7);
 
   const params = new URLSearchParams({

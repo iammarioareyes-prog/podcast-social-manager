@@ -105,8 +105,9 @@ export default function SchedulePage() {
             endpoint = "/api/instagram/post";
             body = {
               postId: post.id,
-              caption: captions.instagram || [post.caption, ...(post.hashtags ?? [])].filter(Boolean).join("\n\n"),
+              caption: captions.instagram || [post.caption, ...(post.hashtags ?? [])].filter(Boolean).join("\n\n") || post.title,
               videoUrl: post.content_url,
+              driveFileId: post.drive_file_id || undefined,
             };
           } else if (platform === "tiktok") {
             endpoint = "/api/tiktok/post";
@@ -114,6 +115,7 @@ export default function SchedulePage() {
               postId: post.id,
               title: captions.tiktok || post.title,
               videoUrl: post.content_url,
+              driveFileId: post.drive_file_id || undefined,
             };
           } else if (platform === "youtube") {
             endpoint = "/api/youtube/upload";

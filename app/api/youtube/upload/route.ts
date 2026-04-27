@@ -82,13 +82,44 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Get Google Drive token early — used for fetching the video file
+    // Get Google Drive token — refresh it if expired
     const { data: driveConn } = await supabase
       .from("platform_connections")
-      .select("access_token")
+      .select("access_token, refresh_token, token_expires_at")
       .eq("platform", "google_drive")
       .single();
-    const driveToken = driveConn?.access_token || token;
+
+    let driveToken = driveConn?.access_token || token;
+    if (driveConn?.refresh_token) {
+      const driveExpiry = driveConn.token_expires_at
+        ? new Date(driveConn.token_expires_at).getTime()
+        : 0;
+      if (Date.now() > driveExpiry - 120_000) {
+        const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            refresh_token: driveConn.refresh_token,
+            client_id: process.env.GOOGLE_DRIVE_CLIENT_ID!,
+            client_secret: process.env.GOOGLE_DRIVE_CLIENT_SECRET!,
+            grant_type: "refresh_token",
+          }),
+        });
+        const refreshed = await refreshRes.json();
+        if (refreshed.access_token) {
+          driveToken = refreshed.access_token;
+          await supabase
+            .from("platform_connections")
+            .update({
+              access_token: refreshed.access_token,
+              token_expires_at: new Date(
+                Date.now() + (refreshed.expires_in ?? 3600) * 1000
+              ).toISOString(),
+            })
+            .eq("platform", "google_drive");
+        }
+      }
+    }
 
     // Resolve the video source URL
     // If a Google Drive file ID is provided, use Drive API directly (faster, no proxy hop)
