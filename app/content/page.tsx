@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { RefreshCw, Search, Filter, FolderOpen, Folder, ChevronRight, Home } from "lucide-react";
+import { RefreshCw, Search, Filter, FolderOpen, Folder, ChevronRight, Home, ChevronDown } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { ContentGrid } from "@/components/content/content-grid";
 import { Button } from "@/components/ui/button";
@@ -27,23 +27,26 @@ interface BreadcrumbEntry {
   name: string;
 }
 
-type FetchResult = { files: DriveFile[]; errorCode?: string };
+const PAGE_SIZE = 100;
 
-async function fetchDriveItems(folderId?: string): Promise<FetchResult> {
-  const params = new URLSearchParams({ pageSize: "100" });
+async function fetchDrivePage(folderId?: string, pageToken?: string) {
+  const params = new URLSearchParams({ pageSize: String(PAGE_SIZE) });
   if (folderId) params.set("folderId", folderId);
+  if (pageToken) params.set("pageToken", pageToken);
   const res = await fetch(`/api/google-drive/files?${params.toString()}`);
   const data = await res.json();
-  if (!res.ok) return { files: [], errorCode: data.error ?? "unknown" };
-  return { files: data.files ?? [] };
+  if (!res.ok) return { files: [] as DriveFile[], nextPageToken: undefined, errorCode: (data.error ?? "unknown") as string };
+  return { files: (data.files ?? []) as DriveFile[], nextPageToken: data.nextPageToken as string | undefined, errorCode: undefined };
 }
 
 export default function ContentPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | "video" | "image">("all");
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const [allItems, setAllItems] = useState<DriveFile[]>([]);
+  const [nextPageToken, setNextPageToken] = useState<string | undefined>();
   const [driveError, setDriveError] = useState<string | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbEntry[]>([
     { id: null, name: "My Drive" },
@@ -54,9 +57,12 @@ export default function ContentPage() {
   const loadFolder = useCallback(async (folderId?: string) => {
     setIsLoading(true);
     setDriveError(null);
-    const result = await fetchDriveItems(folderId ?? undefined);
+    setAllItems([]);
+    setNextPageToken(undefined);
+    const result = await fetchDrivePage(folderId ?? undefined);
     if (result.errorCode) setDriveError(result.errorCode);
     setAllItems(result.files);
+    setNextPageToken(result.nextPageToken);
     setIsLoading(false);
   }, []);
 
@@ -65,6 +71,15 @@ export default function ContentPage() {
   }, [loadFolder, currentFolderId]);
 
   const handleRefresh = () => loadFolder(currentFolderId ?? undefined);
+
+  const handleLoadMore = async () => {
+    if (!nextPageToken || isLoadingMore) return;
+    setIsLoadingMore(true);
+    const result = await fetchDrivePage(currentFolderId ?? undefined, nextPageToken);
+    setAllItems((prev) => [...prev, ...result.files]);
+    setNextPageToken(result.nextPageToken);
+    setIsLoadingMore(false);
+  };
 
   const handleFolderClick = (folder: FolderEntry) => {
     setBreadcrumb((prev) => [...prev, { id: folder.id, name: folder.name }]);
@@ -102,6 +117,12 @@ export default function ContentPage() {
 
   const isAtRoot = breadcrumb.length === 1;
 
+  // Summary line shown below the breadcrumb
+  const summaryParts: string[] = [];
+  if (folders.length > 0) summaryParts.push(`${folders.length}${nextPageToken ? "+" : ""} ${isAtRoot ? "guest folders" : "subfolders"}`);
+  if (files.length > 0) summaryParts.push(`${files.length}${nextPageToken ? "+" : ""} clip${files.length !== 1 ? "s" : ""}`);
+  const summary = summaryParts.join(", ");
+
   return (
     <div className="flex flex-col">
       <Header
@@ -119,6 +140,7 @@ export default function ContentPage() {
                 <span className="font-medium text-foreground flex items-center gap-1">
                   {i === 0 ? <Home className="h-3.5 w-3.5" /> : <Folder className="h-3.5 w-3.5" />}
                   {crumb.name}
+                  {summary ? <span className="ml-1 text-xs font-normal text-muted-foreground">({summary})</span> : null}
                 </span>
               ) : (
                 <button
@@ -170,11 +192,11 @@ export default function ContentPage() {
           </Button>
         </div>
 
-        {/* Episode folders (shown at every level that has subfolders) */}
+        {/* Guest / episode folders */}
         {folders.length > 0 && (
           <div>
             <h2 className="mb-3 text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              {isAtRoot ? "Episodes" : "Subfolders"}
+              {isAtRoot ? "Guest Folders" : "Subfolders"}
             </h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {folders.map((folder) => (
@@ -195,17 +217,17 @@ export default function ContentPage() {
           </div>
         )}
 
-        {/* Files */}
+        {/* Clips / files */}
         {(files.length > 0 || isLoading) && (
           <div>
             {folders.length > 0 && (
               <h2 className="mb-3 text-sm font-medium text-muted-foreground uppercase tracking-wide">
-                Files
+                Clips
               </h2>
             )}
             <Tabs defaultValue="all">
               <TabsList className="bg-card border border-border">
-                <TabsTrigger value="all">All ({filteredFiles.length})</TabsTrigger>
+                <TabsTrigger value="all">All ({filteredFiles.length}{nextPageToken ? "+" : ""})</TabsTrigger>
                 <TabsTrigger value="shorts">Shorts ({shortClips.length})</TabsTrigger>
                 <TabsTrigger value="episodes">Full Episodes ({fullEpisodes.length})</TabsTrigger>
                 <TabsTrigger value="thumbnails">Thumbnails ({thumbnails.length})</TabsTrigger>
@@ -224,6 +246,25 @@ export default function ContentPage() {
                 <ContentGrid files={thumbnails} isLoading={isLoading} />
               </TabsContent>
             </Tabs>
+          </div>
+        )}
+
+        {/* Load More */}
+        {nextPageToken && !isLoading && (
+          <div className="flex justify-center pt-2">
+            <Button
+              variant="outline"
+              onClick={handleLoadMore}
+              disabled={isLoadingMore}
+              className="gap-2"
+            >
+              {isLoadingMore ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+              {isLoadingMore ? "Loading…" : `Load more`}
+            </Button>
           </div>
         )}
 
