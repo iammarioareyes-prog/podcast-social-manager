@@ -10,7 +10,7 @@ export async function GET() {
     return NextResponse.json({ error: "TikTok OAuth not configured" }, { status: 500 });
   }
 
-  const scope = "user.info.basic,video.upload";
+  const scope = "user.info.basic"; // TEST: isolate whether video.upload scope is the blocker
   const state = Math.random().toString(36).substring(7);
 
   // Build params WITHOUT scope so URLSearchParams doesn't encode the comma as %2C.
