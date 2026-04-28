@@ -36,7 +36,7 @@ export async function GET() {
     .select("*")
     .in("status", ["scheduled", "publishing"]) // pick up stuck 'publishing' too
     .gte("scheduled_at", todayStart.toISOString())
-    .lte("scheduled_at", todayEnd.toISOString())
+    .lte("scheduled_at", now.toISOString()) // only posts whose time has come
     .order("scheduled_at", { ascending: true });
 
   if (error) {

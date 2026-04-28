@@ -28,6 +28,7 @@ interface PlatformConnection {
   platform: string;
   is_connected: boolean;
   platform_username?: string;
+  token_expires_at?: string;
 }
 
 interface PlatformCardProps {
@@ -41,6 +42,7 @@ interface PlatformCardProps {
   onDisconnect: () => void;
   setupDescription?: string;
   setupUrl?: string;
+  expiryWarning?: string; // amber warning shown when token is near/past expiry
 }
 
 function PlatformCard({
@@ -54,6 +56,7 @@ function PlatformCard({
   onDisconnect,
   setupDescription,
   setupUrl,
+  expiryWarning,
 }: PlatformCardProps) {
   return (
     <Card className="bg-card border-border">
@@ -106,6 +109,23 @@ function PlatformCard({
                 <ExternalLink className="h-3 w-3 text-primary" />
               </a>
             )}
+          </div>
+        )}
+
+        {isConnected && expiryWarning && (
+          <div className="mt-3 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-3 w-3 flex-shrink-0 text-amber-400" />
+              <p className="text-xs text-amber-400">{expiryWarning}</p>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-xs text-amber-400 hover:bg-amber-500/20 hover:text-amber-300 flex-shrink-0 ml-2"
+              onClick={onConnect}
+            >
+              Reconnect
+            </Button>
           </div>
         )}
       </CardContent>
@@ -345,6 +365,22 @@ export default function SettingsPage() {
   const isConnected = (platform: string) => connections[platform]?.is_connected === true;
   const getUsername = (platform: string) => connections[platform]?.platform_username;
 
+  /**
+   * Returns an amber warning string when the platform token expires within
+   * WARN_DAYS days, or has already expired. Returns undefined otherwise.
+   */
+  function getTokenExpiryWarning(platform: string): string | undefined {
+    const WARN_DAYS = 7;
+    const conn = connections[platform];
+    if (!conn?.is_connected || !conn.token_expires_at) return undefined;
+    const expiresAt = new Date(conn.token_expires_at).getTime();
+    const now = Date.now();
+    const daysLeft = Math.floor((expiresAt - now) / (1000 * 60 * 60 * 24));
+    if (daysLeft < 0) return "Token expired — posts will fail until you reconnect.";
+    if (daysLeft <= WARN_DAYS) return `Token expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"} — reconnect soon to avoid interruptions.`;
+    return undefined;
+  }
+
   return (
     <div className="flex flex-col">
       <Header title="Settings" description="Configure your platforms and API keys" />
@@ -374,6 +410,7 @@ export default function SettingsPage() {
               onConnect={() => handleConnect("/api/auth/youtube")}
               onDisconnect={() => handleDisconnect("youtube")}
               setupDescription="Connects via Google OAuth 2.0 with YouTube Data API v3 access."
+              expiryWarning={getTokenExpiryWarning("youtube")}
             />
 
             <PlatformCard
@@ -387,6 +424,7 @@ export default function SettingsPage() {
               onDisconnect={() => handleDisconnect("instagram")}
               setupDescription="Requires Facebook Developer App with Instagram Graph API. Your account must be a Business or Creator account."
               setupUrl="https://developers.facebook.com/apps"
+              expiryWarning={getTokenExpiryWarning("instagram")}
             />
 
             <PlatformCard
@@ -400,6 +438,7 @@ export default function SettingsPage() {
               onDisconnect={() => handleDisconnect("tiktok")}
               setupDescription="Requires TikTok Developer App with Content Posting API access."
               setupUrl="https://developers.tiktok.com"
+              expiryWarning={getTokenExpiryWarning("tiktok")}
             />
           </div>
         </div>

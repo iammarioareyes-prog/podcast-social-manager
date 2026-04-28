@@ -10,7 +10,7 @@ export async function GET() {
   );
   const { data, error } = await supabase
     .from("platform_connections")
-    .select("platform, is_connected, platform_username, platform_user_id, metadata");
+    .select("platform, is_connected, platform_username, platform_user_id, metadata, token_expires_at");
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

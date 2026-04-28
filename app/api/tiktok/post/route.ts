@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
       title,
       videoUrl,
       driveFileId,
-      privacyLevel = "SELF_ONLY",
+      privacyLevel = "PUBLIC_TO_EVERYONE",
       disableDuet = false,
       disableComment = false,
       disableStitch = false,
