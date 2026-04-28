@@ -82,21 +82,26 @@ export async function POST(req: NextRequest) {
 
     // Step 2: Poll until container is FINISHED processing
     let statusCode = "IN_PROGRESS";
+    let lastStatusData: Record<string, unknown> = {};
     let attempts = 0;
     // Poll every 3s up to 10 times (30s max) — sub-function must complete well under 60s
     while (statusCode === "IN_PROGRESS" && attempts < 10) {
       await new Promise((r) => setTimeout(r, 3000));
       const statusRes = await fetch(
-        `${GRAPH}/${containerId}?fields=status_code&access_token=${token}`
+        `${GRAPH}/${containerId}?fields=status_code,error_code,error_message,video_status&access_token=${token}`
       );
-      const statusData = await statusRes.json();
-      statusCode = statusData.status_code ?? "ERROR";
+      lastStatusData = await statusRes.json();
+      statusCode = (lastStatusData.status_code as string) ?? "ERROR";
       attempts++;
     }
 
     if (statusCode !== "FINISHED") {
+      const igError = lastStatusData.error_code
+        ? `IG error ${lastStatusData.error_code}: ${lastStatusData.error_message || lastStatusData.video_status || "unknown reason"}`
+        : `video_status: ${lastStatusData.video_status ?? "none"}`;
+      console.error("Instagram container not finished:", JSON.stringify(lastStatusData));
       return NextResponse.json(
-        { error: `Media processing ended with status: ${statusCode}` },
+        { error: `Media processing ended with status: ${statusCode} — ${igError}` },
         { status: 502 }
       );
     }
