@@ -1,10 +1,42 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createAgentSupabaseClient, getDriveAccessToken } from "@/lib/agent-utils";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const GRAPH = "https://graph.facebook.com/v19.0";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://iamm-podcast-mgr-v1.vercel.app";
+
+/**
+ * If the URL points to our own drive-proxy, resolve the full Google redirect
+ * chain and return the final storage.googleapis.com signed URL.
+ * This gives Instagram a single direct URL with no hops to follow.
+ */
+async function resolveVideoUrl(videoUrl: string): Promise<string> {
+  if (!videoUrl.includes("/api/drive-proxy/")) return videoUrl;
+
+  const fileId = videoUrl.split("/api/drive-proxy/")[1]?.split("?")[0];
+  if (!fileId) return videoUrl;
+
+  const supabase = createAgentSupabaseClient();
+  const token = await getDriveAccessToken(supabase);
+  if (!token) return videoUrl;
+
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${token}`,
+      { redirect: "follow" }
+    );
+    const finalUrl = res.url;
+    try { await res.body?.cancel(); } catch { /* ignore */ }
+    // Make sure we got a real storage URL, not back to googleapis.com without media
+    if (finalUrl && finalUrl !== videoUrl) return finalUrl;
+  } catch {
+    // Fall back to original proxy URL on any error
+  }
+  return videoUrl;
+}
 
 export async function POST(req: NextRequest) {
   const supabase = createClient(
@@ -12,13 +44,16 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
   try {
-    const { postId, caption, videoUrl } = await req.json();
+    const { postId, caption, videoUrl: rawVideoUrl } = await req.json();
 
     // caption must be a non-empty string; videoUrl is the drive-proxy URL
     const effectiveCaption = caption || "";
-    if (!videoUrl) {
+    if (!rawVideoUrl) {
       return NextResponse.json({ error: "videoUrl is required" }, { status: 400 });
     }
+
+    // Resolve proxy URL → final CDN URL so Instagram follows zero redirects
+    const videoUrl = await resolveVideoUrl(rawVideoUrl);
 
     const { data: conn } = await supabase
       .from("platform_connections")
