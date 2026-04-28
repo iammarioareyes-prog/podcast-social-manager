@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
       const tagString = brandHashtags
         .map((t) => (t.startsWith("#") ? t : `#${t}`))
         .join(" ");
-      finalCaption = `${caption}\n\n${tagString}`;
+      finalCaption = `${effectiveCaption}\n\n${tagString}`;
     }
 
     // Step 1: Create media container
@@ -63,7 +63,6 @@ export async function POST(req: NextRequest) {
       caption: finalCaption,
       access_token: token,
     });
-    if (coverUrl) containerParams.set("cover_url", coverUrl);
 
     const containerRes = await fetch(`${GRAPH}/${igId}/media`, {
       method: "POST",
