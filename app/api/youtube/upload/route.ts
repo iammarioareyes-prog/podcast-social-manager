@@ -70,16 +70,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "YouTube not connected" }, { status: 401 });
     }
 
-    // Refresh token if expired (also refresh proactively if we have a refresh_token)
+    // Refresh token if expired
     let token = conn.access_token;
-    if (conn.refresh_token) {
-      const expiresAt = conn.token_expires_at
-        ? new Date(conn.token_expires_at).getTime()
-        : 0;
-      if (Date.now() > expiresAt - 120_000) {
-        const refreshed = await refreshYouTubeToken(conn.refresh_token, supabase);
-        if (refreshed) token = refreshed;
+    const expiresAt = conn.token_expires_at ? new Date(conn.token_expires_at).getTime() : 0;
+    if (Date.now() > expiresAt - 120_000) {
+      if (!conn.refresh_token) {
+        return NextResponse.json({ error: "YouTube token expired — reconnect YouTube in Settings" }, { status: 401 });
       }
+      const refreshed = await refreshYouTubeToken(conn.refresh_token, supabase);
+      if (!refreshed) {
+        return NextResponse.json({ error: "YouTube token refresh failed — reconnect YouTube in Settings" }, { status: 401 });
+      }
+      token = refreshed;
     }
 
     // Get Google Drive token — refresh it if expired
