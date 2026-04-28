@@ -16,6 +16,7 @@ export interface DriveFile {
   parents?: string[];
   description?: string;
   duration?: number;
+  videoMediaMetadata?: { durationMillis?: string; width?: number; height?: number };
 }
 
 export interface DriveFolder {
@@ -78,7 +79,7 @@ export async function listDriveFiles(params: DriveListParams): Promise<{
 
   const searchParams = new URLSearchParams({
     q: queryParts.join(" and "),
-    fields: "nextPageToken,files(id,name,mimeType,size,thumbnailLink,webViewLink,webContentLink,createdTime,modifiedTime,parents,description)",
+    fields: "nextPageToken,files(id,name,mimeType,size,thumbnailLink,webViewLink,webContentLink,createdTime,modifiedTime,parents,description,videoMediaMetadata)",
     pageSize: String(pageSize),
     orderBy: "modifiedTime desc",
   });

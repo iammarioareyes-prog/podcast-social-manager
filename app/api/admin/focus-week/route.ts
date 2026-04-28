@@ -5,6 +5,7 @@ import {
   listGuestSubfolders,
   listClipsInFolder,
 } from "@/lib/agent-utils";
+import { listDriveFiles } from "@/lib/google-drive";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const guestsParam = searchParams.get("guests") || "Mike Williams,Camillia Harris,Grey";
   const days = Math.min(parseInt(searchParams.get("days") || "7"), 30);
+  const source = (searchParams.get("source") || "root").toLowerCase(); // "ig" → use IG subfolder
 
   const keywords = guestsParam
     .split(",")
@@ -44,7 +46,32 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Find matching folders ──────────────────────────────────────────────────
-  const allFolders = await listGuestSubfolders(driveToken);
+  // source=ig → look inside the IG subfolder for guest subfolders
+  let allFolders: { id: string; name: string }[];
+  if (source === "ig") {
+    const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID || "root";
+    const rootContents = await listDriveFiles({
+      folderId: rootFolderId,
+      mimeType: "application/vnd.google-apps.folder",
+      pageSize: 100,
+      accessToken: driveToken,
+    });
+    const igFolder = (rootContents.files ?? []).find(
+      (f) => f.name.toLowerCase() === "ig"
+    );
+    if (!igFolder) {
+      return NextResponse.json({ error: "IG folder not found — run /api/admin/organize-ig-clips first" }, { status: 422 });
+    }
+    const igContents = await listDriveFiles({
+      folderId: igFolder.id,
+      mimeType: "application/vnd.google-apps.folder",
+      pageSize: 100,
+      accessToken: driveToken,
+    });
+    allFolders = igContents.files ?? [];
+  } else {
+    allFolders = await listGuestSubfolders(driveToken);
+  }
   const matchedFolders: Array<{ id: string; name: string; keyword: string }> = [];
 
   for (const keyword of keywords) {

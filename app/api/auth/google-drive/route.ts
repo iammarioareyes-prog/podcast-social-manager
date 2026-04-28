@@ -13,7 +13,8 @@ export async function GET() {
     );
   }
 
-  const scope = "https://www.googleapis.com/auth/drive.readonly";
+  // drive (full) required to move files into IG subfolders; readonly is insufficient
+  const scope = "https://www.googleapis.com/auth/drive";
 
   const params = new URLSearchParams({
     client_id: clientId,
