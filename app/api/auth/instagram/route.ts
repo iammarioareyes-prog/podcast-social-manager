@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const appId = process.env.INSTAGRAM_APP_ID;
   const redirectUri = process.env.INSTAGRAM_REDIRECT_URI;

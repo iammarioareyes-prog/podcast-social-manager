@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID;
   const redirectUri = process.env.GOOGLE_DRIVE_REDIRECT_URI;

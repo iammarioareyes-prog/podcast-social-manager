@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const clientKey = process.env.TIKTOK_CLIENT_KEY;
   const redirectUri = process.env.TIKTOK_REDIRECT_URI;
