@@ -13,14 +13,16 @@ export async function GET() {
   const scope = "user.info.basic,video.upload";
   const state = Math.random().toString(36).substring(7);
 
+  // Build params WITHOUT scope so URLSearchParams doesn't encode the comma as %2C.
+  // TikTok's OAuth server requires a literal comma between scopes.
   const params = new URLSearchParams({
     client_key: clientKey,
     response_type: "code",
-    scope,
     redirect_uri: redirectUri,
     state,
   });
 
-  const authUrl = `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`;
+  // Append scope manually to preserve the literal comma
+  const authUrl = `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}&scope=${scope}`;
   return NextResponse.redirect(authUrl);
 }
