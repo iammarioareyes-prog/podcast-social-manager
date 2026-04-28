@@ -194,7 +194,7 @@ export async function POST(req: NextRequest) {
       const errText = await ytInitRes.text();
       console.error("YouTube resumable init error:", errText);
       return NextResponse.json(
-        { error: "Failed to create YouTube upload session" },
+        { error: `YouTube init failed (${ytInitRes.status}): ${errText.slice(0, 300)}` },
         { status: 502 }
       );
     }

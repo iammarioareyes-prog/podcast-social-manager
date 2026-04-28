@@ -22,10 +22,22 @@ export async function GET(
     return NextResponse.json({ error: "Google Drive not connected" }, { status: 401 });
   }
 
-  // Redirect Instagram/TikTok CDN directly to Google Drive.
-  // The CDN follows the 302 and downloads from Google without touching Vercel.
-  return NextResponse.redirect(
+  // Follow Google's internal redirect chain so the caller (Instagram/TikTok CDN)
+  // only needs to follow ONE hop — to the final storage.googleapis.com signed URL.
+  // googleapis.com itself returns a 302 to storage.googleapis.com; stopping at that
+  // intermediate URL causes Instagram to receive a redirect body rather than video bytes.
+  const probeRes = await fetch(
     `https://www.googleapis.com/drive/v3/files/${params.fileId}?alt=media&access_token=${token}`,
-    { status: 302 }
+    { redirect: "follow" }
   );
+
+  // Cancel the response body — we only needed the final resolved URL
+  try { await probeRes.body?.cancel(); } catch { /* ignore */ }
+
+  if (!probeRes.ok && probeRes.url === `https://www.googleapis.com/drive/v3/files/${params.fileId}?alt=media&access_token=${token}`) {
+    return NextResponse.json({ error: "Google Drive file not accessible" }, { status: 502 });
+  }
+
+  // probeRes.url is the fully resolved CDN URL — redirect the caller there directly
+  return NextResponse.redirect(probeRes.url, { status: 302 });
 }
