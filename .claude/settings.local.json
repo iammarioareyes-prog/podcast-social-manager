@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Read(//Users/manifex22/Documents/evelyn-rose-outreach/**)",
+      "Bash(npm install:*)"
     ]
   }
 }
