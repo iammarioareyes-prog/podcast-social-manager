@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
   const guestsParam = searchParams.get("guests") || "Mike Williams,Camillia Harris,Grey";
   const days = Math.min(parseInt(searchParams.get("days") || "7"), 30);
   const source = (searchParams.get("source") || "root").toLowerCase(); // "ig" → use IG subfolder
+  const maxDurationSec = parseInt(searchParams.get("maxDuration") || "0"); // 0 = no filter
 
   const keywords = guestsParam
     .split(",")
@@ -106,7 +107,17 @@ export async function GET(req: NextRequest) {
   const folderDecks: Array<{ name: string; clips: { id: string; name: string }[] }> = [];
 
   for (const folder of matchedFolders) {
-    const clips = await listClipsInFolder(folder.id, driveToken);
+    let clips = await listClipsInFolder(folder.id, driveToken);
+
+    // Filter by duration if ?maxDuration=N was passed (N = seconds)
+    if (maxDurationSec > 0) {
+      clips = clips.filter((c) => {
+        const durMs = parseInt((c as any).videoMediaMetadata?.durationMillis ?? "0");
+        if (durMs === 0) return false; // no metadata — exclude to be safe
+        return durMs <= maxDurationSec * 1000;
+      });
+    }
+
     const unposted = clips.filter((c) => !postedIds.includes(c.id));
     folderDecks.push({ name: folder.name, clips: unposted });
   }
