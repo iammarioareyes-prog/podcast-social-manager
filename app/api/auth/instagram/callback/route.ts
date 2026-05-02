@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     const redirectUri = process.env.INSTAGRAM_REDIRECT_URI!;
 
     // Step 1: Exchange code for short-lived access token
-    const tokenRes = await fetch("https://graph.facebook.com/v19.0/oauth/access_token", {
+    const tokenRes = await fetch("https://graph.facebook.com/v21.0/oauth/access_token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
     // Step 2: Exchange for long-lived token (60 days)
     const longTokenRes = await fetch(
-      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortLivedToken}`
+      `https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortLivedToken}`
     );
     const longTokenData = await longTokenRes.json();
     const accessToken = longTokenData.access_token || shortLivedToken;
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
 
     // Step 3: Get Facebook Pages to find Instagram Business Account
     const pagesRes = await fetch(
-      `https://graph.facebook.com/v19.0/me/accounts?access_token=${accessToken}`
+      `https://graph.facebook.com/v21.0/me/accounts?access_token=${accessToken}`
     );
     const pagesData = await pagesRes.json();
     const pages = pagesData.data || [];
@@ -63,12 +63,12 @@ export async function GET(request: NextRequest) {
     const igAccounts: { accountId: string; username: string; pageAccessToken: string }[] = [];
     for (const page of pages) {
       const igRes = await fetch(
-        `https://graph.facebook.com/v19.0/${page.id}?fields=instagram_business_account&access_token=${page.access_token}`
+        `https://graph.facebook.com/v21.0/${page.id}?fields=instagram_business_account&access_token=${page.access_token}`
       );
       const igData = await igRes.json();
       if (igData.instagram_business_account?.id) {
         const igUserRes = await fetch(
-          `https://graph.facebook.com/v19.0/${igData.instagram_business_account.id}?fields=username,name&access_token=${page.access_token}`
+          `https://graph.facebook.com/v21.0/${igData.instagram_business_account.id}?fields=username,name&access_token=${page.access_token}`
         );
         const igUserData = await igUserRes.json();
         igAccounts.push({

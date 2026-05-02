@@ -1,42 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { createAgentSupabaseClient, getDriveAccessToken } from "@/lib/agent-utils";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const GRAPH = "https://graph.facebook.com/v19.0";
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://iamm-podcast-mgr-v1.vercel.app";
-
-/**
- * If the URL points to our own drive-proxy, resolve the full Google redirect
- * chain and return the final storage.googleapis.com signed URL.
- * This gives Instagram a single direct URL with no hops to follow.
- */
-async function resolveVideoUrl(videoUrl: string): Promise<string> {
-  if (!videoUrl.includes("/api/drive-proxy/")) return videoUrl;
-
-  const fileId = videoUrl.split("/api/drive-proxy/")[1]?.split("?")[0];
-  if (!fileId) return videoUrl;
-
-  const supabase = createAgentSupabaseClient();
-  const token = await getDriveAccessToken(supabase);
-  if (!token) return videoUrl;
-
-  try {
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${token}`,
-      { redirect: "follow" }
-    );
-    const finalUrl = res.url;
-    try { await res.body?.cancel(); } catch { /* ignore */ }
-    // Make sure we got a real storage URL, not back to googleapis.com without media
-    if (finalUrl && finalUrl !== videoUrl) return finalUrl;
-  } catch {
-    // Fall back to original proxy URL on any error
-  }
-  return videoUrl;
-}
+const GRAPH = "https://graph.facebook.com/v21.0";
 
 export async function POST(req: NextRequest) {
   const supabase = createClient(
@@ -44,20 +12,16 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
   try {
-    const { postId, caption, videoUrl: rawVideoUrl } = await req.json();
+    const { postId, caption, videoUrl } = await req.json();
 
-    // caption must be a non-empty string; videoUrl is the drive-proxy URL
     const effectiveCaption = caption || "";
-    if (!rawVideoUrl) {
+    if (!videoUrl) {
       return NextResponse.json({ error: "videoUrl is required" }, { status: 400 });
     }
 
-    // Resolve proxy URL → final CDN URL so Instagram follows zero redirects
-    const videoUrl = await resolveVideoUrl(rawVideoUrl);
-
     const { data: conn } = await supabase
       .from("platform_connections")
-      .select("access_token, platform_user_id, metadata")
+      .select("access_token, platform_user_id, metadata, token_expires_at")
       .eq("platform", "instagram")
       .eq("is_connected", true)
       .single();
@@ -66,9 +30,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Instagram not connected" }, { status: 401 });
     }
 
+    // Guard: surface a clear error if the token is expired so the UI shows
+    // "reconnect Instagram" rather than a cryptic API error.
+    if (conn.token_expires_at) {
+      const expiresAt = new Date(conn.token_expires_at).getTime();
+      if (Date.now() >= expiresAt) {
+        return NextResponse.json(
+          { error: "Instagram token expired — please reconnect Instagram in Settings" },
+          { status: 401 }
+        );
+      }
+    }
+
     const igId = conn.metadata?.instagram_account_id || conn.platform_user_id;
     if (!igId) {
-      return NextResponse.json({ error: "Instagram account ID not found in connection" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Instagram account ID not found — please reconnect Instagram in Settings" },
+        { status: 400 }
+      );
     }
 
     const token = conn.access_token;
@@ -89,9 +68,9 @@ export async function POST(req: NextRequest) {
       finalCaption = `${effectiveCaption}\n\n${tagString}`;
     }
 
-    // Step 1: Create media container
-    // videoUrl is the drive-proxy URL which issues a 302 redirect to Google Drive.
-    // Instagram's CDN follows the redirect and downloads from Google directly.
+    // Step 1: Create media container.
+    // videoUrl points to our drive-proxy which streams video bytes directly —
+    // no redirect chains, no short-lived signed URLs.
     const containerParams = new URLSearchParams({
       media_type: "REELS",
       video_url: videoUrl,
@@ -99,6 +78,7 @@ export async function POST(req: NextRequest) {
       access_token: token,
     });
 
+    console.log(`[IG] Creating container for IG account ${igId}, videoUrl=${videoUrl}`);
     const containerRes = await fetch(`${GRAPH}/${igId}/media`, {
       method: "POST",
       body: containerParams,
@@ -106,42 +86,49 @@ export async function POST(req: NextRequest) {
     const containerData = await containerRes.json();
 
     if (!containerRes.ok || containerData.error) {
-      console.error("Instagram container error:", containerData);
+      const errMsg = containerData.error?.message || JSON.stringify(containerData);
+      console.error("[IG] Container creation failed:", JSON.stringify(containerData));
       return NextResponse.json(
-        { error: containerData.error?.message || "Failed to create media container" },
+        { error: `Instagram container error: ${errMsg}` },
         { status: 502 }
       );
     }
 
     const containerId = containerData.id;
+    console.log(`[IG] Container created: ${containerId}`);
 
-    // Step 2: Poll until container is FINISHED processing
+    // Step 2: Poll until container is FINISHED processing.
+    // Poll up to 20 times (every 3s = 60s max) to give Vercel's 60s limit
+    // the best chance of capturing FINISHED before timeout.
     let statusCode = "IN_PROGRESS";
     let lastStatusData: Record<string, unknown> = {};
     let attempts = 0;
-    // Poll every 3s up to 10 times (30s max) — sub-function must complete well under 60s
-    while (statusCode === "IN_PROGRESS" && attempts < 10) {
+
+    while ((statusCode === "IN_PROGRESS" || statusCode === "PUBLISHED") && attempts < 20) {
       await new Promise((r) => setTimeout(r, 3000));
       const statusRes = await fetch(
         `${GRAPH}/${containerId}?fields=status_code,error_code,error_message,video_status&access_token=${token}`
       );
       lastStatusData = await statusRes.json();
       statusCode = (lastStatusData.status_code as string) ?? "ERROR";
+      console.log(`[IG] Container ${containerId} poll ${attempts + 1}: ${statusCode}`, JSON.stringify(lastStatusData));
       attempts++;
+      if (statusCode === "FINISHED") break;
     }
 
     if (statusCode !== "FINISHED") {
-      const igError = lastStatusData.error_code
-        ? `IG error ${lastStatusData.error_code}: ${lastStatusData.error_message || lastStatusData.video_status || "unknown reason"}`
-        : `video_status: ${lastStatusData.video_status ?? "none"}`;
-      console.error("Instagram container not finished:", JSON.stringify(lastStatusData));
+      const detail = lastStatusData.error_code
+        ? `error_code=${lastStatusData.error_code}, error_message=${lastStatusData.error_message ?? "none"}`
+        : `video_status=${lastStatusData.video_status ?? "none"}`;
+      console.error("[IG] Container not finished:", JSON.stringify(lastStatusData));
       return NextResponse.json(
-        { error: `Media processing ended with status: ${statusCode} — ${igError}` },
+        { error: `Instagram processing ended with status: ${statusCode} — ${detail}` },
         { status: 502 }
       );
     }
 
     // Step 3: Publish
+    console.log(`[IG] Publishing container ${containerId}`);
     const publishRes = await fetch(`${GRAPH}/${igId}/media_publish`, {
       method: "POST",
       body: new URLSearchParams({ creation_id: containerId, access_token: token }),
@@ -149,14 +136,16 @@ export async function POST(req: NextRequest) {
     const publishData = await publishRes.json();
 
     if (!publishRes.ok || publishData.error) {
-      console.error("Instagram publish error:", publishData);
+      const errMsg = publishData.error?.message || JSON.stringify(publishData);
+      console.error("[IG] Publish failed:", JSON.stringify(publishData));
       return NextResponse.json(
-        { error: publishData.error?.message || "Failed to publish" },
+        { error: `Instagram publish failed: ${errMsg}` },
         { status: 502 }
       );
     }
 
     const mediaId = publishData.id;
+    console.log(`[IG] Published successfully: mediaId=${mediaId}`);
 
     if (postId) {
       await supabase

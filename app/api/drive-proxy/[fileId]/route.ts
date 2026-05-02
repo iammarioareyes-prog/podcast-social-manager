@@ -2,14 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAgentSupabaseClient, getDriveAccessToken } from "@/lib/agent-utils";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 /**
  * GET /api/drive-proxy/[fileId]
  *
- * Returns a 302 redirect to the direct Google Drive download URL.
- * Instagram and TikTok CDNs follow the redirect and download straight
- * from Google — no Vercel streaming timeout, no large-file issues.
- * getDriveAccessToken auto-refreshes the token if it's expired.
+ * Streams the Google Drive file bytes directly through our server.
+ * This gives Instagram / TikTok / YouTube a STABLE URL that serves
+ * real video bytes on every request — no short-lived signed URLs, no
+ * redirect chains, no expiry races.
+ *
+ * getDriveAccessToken auto-refreshes the Google OAuth token when needed.
  */
 export async function GET(
   req: NextRequest,
@@ -22,22 +25,31 @@ export async function GET(
     return NextResponse.json({ error: "Google Drive not connected" }, { status: 401 });
   }
 
-  // Follow Google's internal redirect chain so the caller (Instagram/TikTok CDN)
-  // only needs to follow ONE hop — to the final storage.googleapis.com signed URL.
-  // googleapis.com itself returns a 302 to storage.googleapis.com; stopping at that
-  // intermediate URL causes Instagram to receive a redirect body rather than video bytes.
-  const probeRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${params.fileId}?alt=media&access_token=${token}`,
-    { redirect: "follow" }
+  const driveRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${params.fileId}?alt=media`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      redirect: "follow",
+    }
   );
 
-  // Cancel the response body — we only needed the final resolved URL
-  try { await probeRes.body?.cancel(); } catch { /* ignore */ }
-
-  if (!probeRes.ok && probeRes.url === `https://www.googleapis.com/drive/v3/files/${params.fileId}?alt=media&access_token=${token}`) {
-    return NextResponse.json({ error: "Google Drive file not accessible" }, { status: 502 });
+  if (!driveRes.ok) {
+    const errText = await driveRes.text().catch(() => "");
+    console.error(`Drive proxy error ${driveRes.status} for ${params.fileId}: ${errText.slice(0, 200)}`);
+    return NextResponse.json(
+      { error: `Google Drive fetch failed (${driveRes.status})` },
+      { status: 502 }
+    );
   }
 
-  // probeRes.url is the fully resolved CDN URL — redirect the caller there directly
-  return NextResponse.redirect(probeRes.url, { status: 302 });
+  // Forward the video bytes and relevant headers to the caller
+  const resHeaders = new Headers();
+  const contentType = driveRes.headers.get("content-type") || "video/mp4";
+  const contentLength = driveRes.headers.get("content-length");
+  resHeaders.set("content-type", contentType);
+  if (contentLength) resHeaders.set("content-length", contentLength);
+  resHeaders.set("cache-control", "public, max-age=3600");
+  resHeaders.set("accept-ranges", "bytes");
+
+  return new NextResponse(driveRes.body, { status: 200, headers: resHeaders });
 }
