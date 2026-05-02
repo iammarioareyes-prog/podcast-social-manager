@@ -117,18 +117,33 @@ export async function GET() {
             parents: [igFolder.id],
           }),
         });
+        if (!createRes.ok) {
+          const err = await createRes.json().catch(() => ({}));
+          return NextResponse.json(
+            { error: `Cannot create subfolder — Drive permission denied (${createRes.status}). Reconnect Google Drive in Settings to get write access.`, detail: err },
+            { status: 403 }
+          );
+        }
         const created = await createRes.json();
         igSubfolders[key] = created.id;
       }
 
       // ── Move file → IG/[GuestName]/ ─────────────────────────────────────
-      await fetch(
+      const moveRes = await fetch(
         `${DRIVE}/files/${file.id}?addParents=${igSubfolders[key]}&removeParents=${guestFolder.id}&fields=id`,
         {
           method: "PATCH",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         }
       );
+
+      if (!moveRes.ok) {
+        const err = await moveRes.json().catch(() => ({}));
+        return NextResponse.json(
+          { error: `Cannot move file — Drive permission denied (${moveRes.status}). Reconnect Google Drive in Settings to get write access.`, detail: err },
+          { status: 403 }
+        );
+      }
 
       moved++;
     }
