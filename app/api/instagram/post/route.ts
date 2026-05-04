@@ -120,9 +120,19 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      console.log(`[IG] Container ${containerId} ready, fetching video from Drive…`);
+      console.log(`[IG] Container ${containerId} ready, fetching Drive metadata…`);
 
-      // 1b. Fetch video bytes from Google Drive
+      // 1b. Get file size from Drive metadata (required by Facebook before streaming starts)
+      const metaRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?fields=size,mimeType`,
+        { headers: { Authorization: `Bearer ${driveToken}` } }
+      );
+      const meta = metaRes.ok ? await metaRes.json() : {};
+      const fileSize = String(parseInt(meta.size || "0", 10));
+      const contentType: string = meta.mimeType || "video/mp4";
+      console.log(`[IG] File size=${fileSize} bytes, type=${contentType}`);
+
+      // 1c. Open Drive download stream
       const driveRes = await fetch(
         `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
         { headers: { Authorization: `Bearer ${driveToken}` }, redirect: "follow" }
@@ -137,20 +147,19 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const videoBytes = await driveRes.arrayBuffer();
-      const contentType = driveRes.headers.get("content-type") || "video/mp4";
-      console.log(`[IG] Fetched ${videoBytes.byteLength} bytes (${contentType}), uploading to Facebook…`);
-
-      // 1c. Push bytes to Facebook's upload endpoint
+      // 1d. Stream bytes from Drive directly to Facebook — no full-file buffer needed.
+      // Pipelining Drive→Facebook cuts wall-clock time roughly in half vs buffer+upload.
+      console.log(`[IG] Streaming Drive→Facebook…`);
       const uploadRes = await fetch(uploadUri, {
         method: "POST",
         headers: {
           Authorization: `OAuth ${token}`,
           "Content-Type": contentType,
           offset: "0",
-          file_size: String(videoBytes.byteLength),
+          file_size: fileSize,
         },
-        body: videoBytes,
+        // @ts-ignore — Node 18 fetch accepts ReadableStream body; no duplex flag needed server-side
+        body: driveRes.body,
       });
 
       if (!uploadRes.ok) {

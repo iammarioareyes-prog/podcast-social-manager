@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://iamm-podcast-mgr-v1.vercel.app";
-const POSTING_HOURS_UTC = [13, 18, 23]; // 9am, 2pm, 7pm EDT
+const POSTING_HOURS_UTC = [13, 18]; // 9am, 2pm EDT — matches the 2 Vercel Hobby cron slots
 
 /**
  * GET /api/admin/focus-week?guests=Mike+Williams,Camillia+Harris,Grey
@@ -139,10 +139,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `Clear failed: ${deleteErr.message}` }, { status: 500 });
   }
 
-  // ── Build 7-day schedule ───────────────────────────────────────────────────
-  // Each day: 1 clip from each matched folder
-  // Rotate which folder fills which time slot daily so the posting order varies
+  // ── Build schedule ─────────────────────────────────────────────────────────
+  // Vercel Hobby only supports 2 cron jobs, both mapped to post-now.
+  // We therefore cap posts at 2 per day (one per cron slot).
+  // With N guest folders, rotate which 2 folders fill the slots each day so
+  // every guest gets equal coverage over the week.
   const n = matchedFolders.length;
+  const slotsPerDay = Math.min(n, POSTING_HOURS_UTC.length); // 2
   const postsToInsert: Record<string, unknown>[] = [];
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -151,7 +154,7 @@ export async function GET(req: NextRequest) {
     const day = new Date(today);
     day.setUTCDate(today.getUTCDate() + dayOffset);
 
-    for (let slot = 0; slot < n; slot++) {
+    for (let slot = 0; slot < slotsPerDay; slot++) {
       // Rotate folder → slot assignment each day
       const folderIdx = (slot + dayOffset) % n;
       const deck = folderDecks[folderIdx];
@@ -160,7 +163,7 @@ export async function GET(req: NextRequest) {
 
       const clip = deck.clips.shift()!; // take next unposted clip
       const scheduledAt = new Date(day);
-      scheduledAt.setUTCHours(POSTING_HOURS_UTC[slot % POSTING_HOURS_UTC.length], 0, 0, 0);
+      scheduledAt.setUTCHours(POSTING_HOURS_UTC[slot], 0, 0, 0);
 
       postsToInsert.push({
         title: clip.name.replace(/\.[^.]+$/, ""),

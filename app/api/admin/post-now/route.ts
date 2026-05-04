@@ -23,11 +23,13 @@ export async function GET() {
   const todayEnd = new Date(now);
   todayEnd.setUTCHours(23, 59, 59, 999);
 
-  // Reset today's failed posts back to scheduled so they get retried
+  // Reset today's failed OR stuck-publishing posts back to scheduled so they get retried.
+  // "publishing" posts can get stuck if a previous function invocation timed out before
+  // it could write the final status — treat them the same as failed.
   await supabase
     .from("posts")
     .update({ status: "scheduled", updated_at: now.toISOString() })
-    .eq("status", "failed")
+    .in("status", ["failed", "publishing"])
     .gte("scheduled_at", todayStart.toISOString())
     .lte("scheduled_at", todayEnd.toISOString());
 
@@ -65,12 +67,18 @@ export async function GET() {
       const captions = (post.captions_json as Record<string, string>) || {};
       const videoUrl = post.content_url;
 
-      // Build a real caption when the post has none (e.g. focus-week scheduled posts).
-      // post.description holds "Guest: <name>" from focus-week.
+      // Build caption from guest name stored in description ("Guest: <name>").
+      // This is the fallback when no AI-generated caption exists in captions_json.
       const guestName = (post.description || "").replace(/^Guest:\s*/i, "").trim();
       const defaultCaption = guestName
         ? `${post.title}\n\n${guestName} drops knowledge on the I Am Mario Areyes Podcast. You don't want to miss this one. 🎙️`
         : post.title;
+
+      // Prefer AI captions from captions_json; fall through to the template.
+      // NOTE: never use post.description as a caption — it holds internal metadata ("Guest: X").
+      const igCaption  = captions.instagram || defaultCaption;
+      const ytDesc     = captions.youtube   || defaultCaption;
+      const ttTitle    = captions.tiktok    || post.title;
 
       if (!videoUrl) {
         await supabase.from("posts").update({ status: "failed" }).eq("id", post.id);
@@ -80,18 +88,18 @@ export async function GET() {
       const [igRes, ttRes, ytRes] = await Promise.allSettled([
         callPlatform(`${APP_URL}/api/instagram/post`, {
           postId: post.id,
-          caption: captions.instagram || post.caption || defaultCaption,
+          caption: igCaption,
           videoUrl,
         }),
         callPlatform(`${APP_URL}/api/tiktok/post`, {
           postId: post.id,
-          title: captions.tiktok || post.title,
+          title: ttTitle,
           videoUrl,
         }),
         callPlatform(`${APP_URL}/api/youtube/upload`, {
           postId: post.id,
           title: post.title,
-          description: captions.youtube || post.description || defaultCaption,
+          description: ytDesc,
           tags: post.hashtags || [],
           videoUrl,
           driveFileId: post.drive_file_id || undefined,
@@ -139,7 +147,7 @@ export async function GET() {
 
 async function callPlatform(url: string, body: Record<string, unknown>): Promise<Record<string, string>> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 50_000); // 50s hard limit per platform
+  const timeout = setTimeout(() => controller.abort(), 55_000); // 55s hard limit per platform
   try {
     const res = await fetch(url, {
       method: "POST",
