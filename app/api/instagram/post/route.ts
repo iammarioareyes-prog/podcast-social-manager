@@ -87,19 +87,25 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // 1a. Create container requesting a resumable-upload URI (no video_url)
-      console.log(`[IG] Creating resumable container for account ${igId}`);
-      const containerRes = await fetch(`${GRAPH}/${igId}/media`, {
-        method: "POST",
-        body: new URLSearchParams({
-          media_type: "REELS",
-          upload_type: "resumable",
-          caption: finalCaption,
-          access_token: token,
+      // 1a. Fire container creation and Drive metadata fetch in parallel to save time
+      console.log(`[IG] Creating resumable container + fetching Drive metadata in parallel…`);
+      const [containerRes, metaRes] = await Promise.all([
+        fetch(`${GRAPH}/${igId}/media`, {
+          method: "POST",
+          body: new URLSearchParams({
+            media_type: "REELS",
+            upload_type: "resumable",
+            caption: finalCaption,
+            access_token: token,
+          }),
         }),
-      });
-      const containerData = await containerRes.json();
+        fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=size,mimeType`,
+          { headers: { Authorization: `Bearer ${driveToken}` } }
+        ),
+      ]);
 
+      const containerData = await containerRes.json();
       if (!containerRes.ok || containerData.error) {
         console.error("[IG] Container creation error:", JSON.stringify(containerData));
         return NextResponse.json(
@@ -112,7 +118,6 @@ export async function POST(req: NextRequest) {
       const uploadUri: string | undefined = containerData.uri;
 
       if (!uploadUri) {
-        // API returned an id but no upload URI — shouldn't happen, log and bail
         console.error("[IG] No upload URI in container response:", JSON.stringify(containerData));
         return NextResponse.json(
           { error: "Instagram did not return an upload URI — account may not support resumable uploads" },
@@ -120,19 +125,13 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      console.log(`[IG] Container ${containerId} ready, fetching Drive metadata…`);
-
-      // 1b. Get file size from Drive metadata (required by Facebook before streaming starts)
-      const metaRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${fileId}?fields=size,mimeType`,
-        { headers: { Authorization: `Bearer ${driveToken}` } }
-      );
       const meta = metaRes.ok ? await metaRes.json() : {};
-      const fileSize = String(parseInt(meta.size || "0", 10));
       const contentType: string = meta.mimeType || "video/mp4";
-      console.log(`[IG] File size=${fileSize} bytes, type=${contentType}`);
+      console.log(`[IG] Container ${containerId} ready, uploadUri obtained. Downloading video from Drive…`);
 
-      // 1c. Open Drive download stream
+      // 1b. Download video bytes from Drive into a buffer.
+      // Using arrayBuffer() instead of streaming — Vercel's Next.js fetch wrapper does
+      // not support piping Response.body directly into another fetch body (throws TypeError).
       const driveRes = await fetch(
         `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
         { headers: { Authorization: `Bearer ${driveToken}` }, redirect: "follow" }
@@ -147,19 +146,19 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // 1d. Stream bytes from Drive directly to Facebook — no full-file buffer needed.
-      // Pipelining Drive→Facebook cuts wall-clock time roughly in half vs buffer+upload.
-      console.log(`[IG] Streaming Drive→Facebook…`);
+      const videoBytes = await driveRes.arrayBuffer();
+      console.log(`[IG] Downloaded ${videoBytes.byteLength} bytes (${contentType}). Uploading to Facebook…`);
+
+      // 1c. Push the buffered bytes to Facebook's upload endpoint
       const uploadRes = await fetch(uploadUri, {
         method: "POST",
         headers: {
           Authorization: `OAuth ${token}`,
           "Content-Type": contentType,
           offset: "0",
-          file_size: fileSize,
+          file_size: String(videoBytes.byteLength),
         },
-        // @ts-ignore — Node 18 fetch accepts ReadableStream body; no duplex flag needed server-side
-        body: driveRes.body,
+        body: videoBytes,
       });
 
       if (!uploadRes.ok) {
@@ -264,7 +263,8 @@ export async function POST(req: NextRequest) {
       permalink: `https://www.instagram.com/reel/${mediaId}/`,
     });
   } catch (error) {
-    console.error("Instagram post error:", error);
-    return NextResponse.json({ error: "Failed to post to Instagram" }, { status: 500 });
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("Instagram post unhandled error:", msg, error);
+    return NextResponse.json({ error: `Instagram internal error: ${msg}` }, { status: 500 });
   }
 }
