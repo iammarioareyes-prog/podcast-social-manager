@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, X, Send, Loader2, Zap, Trash2 } from "lucide-react";
+import { Plus, X, Send, Loader2, Zap, Trash2, RefreshCw } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { PostCreator } from "@/components/schedule/post-creator";
 import { CalendarView } from "@/components/schedule/calendar-view";
@@ -16,6 +16,7 @@ export default function SchedulePage() {
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [isPostingToday, setIsPostingToday] = useState(false);
   const [isClearingQueue, setIsClearingQueue] = useState(false);
+  const [isRebuildingSchedule, setIsRebuildingSchedule] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
@@ -182,6 +183,27 @@ export default function SchedulePage() {
     }
   };
 
+  const handleRebuildSchedule = async () => {
+    setIsRebuildingSchedule(true);
+    try {
+      const res = await fetch("/api/admin/focus-week");
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || "Failed to rebuild schedule", "error");
+      } else {
+        showToast(
+          `Schedule rebuilt — ${data.postsCreated} posts across ${data.daysScheduled} days (${data.guestsMatched?.join(", ")})`,
+          "success"
+        );
+        await loadPosts();
+      }
+    } catch {
+      showToast("Rebuild timed out — try again", "error");
+    } finally {
+      setIsRebuildingSchedule(false);
+    }
+  };
+
   const handleClearQueue = async () => {
     setShowClearConfirm(false);
     setIsClearingQueue(true);
@@ -274,6 +296,19 @@ export default function SchedulePage() {
                 <Trash2 className="h-4 w-4" />
               )}
               {isClearingQueue ? "Clearing…" : "Clear Queue"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleRebuildSchedule}
+              disabled={isRebuildingSchedule}
+              className="gap-2"
+            >
+              {isRebuildingSchedule ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {isRebuildingSchedule ? "Building…" : "Rebuild Schedule"}
             </Button>
             <Button
               variant="outline"
