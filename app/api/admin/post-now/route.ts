@@ -71,7 +71,7 @@ export async function GET() {
       // This is the fallback when no AI-generated caption exists in captions_json.
       const guestName = (post.description || "").replace(/^Guest:\s*/i, "").trim();
       const defaultCaption = guestName
-        ? `${post.title}\n\n${guestName} drops knowledge on the I Am Mario Areyes Podcast. You don't want to miss this one. 🎙️`
+        ? `${post.title}\n\n${guestName} drops knowledge on the I Am Mario Areyes Podcast. You don't want to miss this one. 🎙️\n\nFull convo → link in bio`
         : post.title;
 
       // Prefer AI captions from captions_json; fall through to the template.

@@ -6,14 +6,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const GRAPH = "https://graph.facebook.com/v21.0";
-const TEMP_BUCKET = "ig-temp";
 
 export async function POST(req: NextRequest) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-  let tempStorageKey: string | null = null;
+  let drivePermissionId: string | null = null;
+  let drivePermFileId: string | null = null;
 
   try {
     const { postId, caption, videoUrl } = await req.json();
@@ -69,8 +69,9 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Resolve video URL ─────────────────────────────────────────────────────
-    // When the video is a Drive file: download bytes server-side, stage them in
-    // Supabase Storage (public bucket), then hand Instagram a stable CDN URL.
+    // When the video is a Drive file: temporarily make it publicly readable via
+    // the Drive Permissions API, then hand Instagram the direct Drive download
+    // URL.  No download/re-upload needed — Instagram's CDN can fetch it directly.
     //
     // Why not use the drive-proxy URL directly? Instagram's CDN times out
     // waiting for a cold-start Vercel function to begin streaming.
@@ -78,8 +79,7 @@ export async function POST(req: NextRequest) {
     // Why not use Facebook's resumable-upload API? Returns 400
     // ProcessingFailedError due to undocumented format constraints.
     //
-    // Supabase Storage CDN is always fast and publicly accessible — Instagram
-    // downloads it without issues.
+    // Why not Supabase Storage? Supabase project-level 50 MB cap blocks clips.
     let igVideoUrl = videoUrl;
 
     if (fileId) {
@@ -93,45 +93,37 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Download video bytes from Drive
-      console.log(`[IG] Downloading Drive file ${fileId}…`);
-      const driveRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-        { headers: { Authorization: `Bearer ${driveToken}` }, redirect: "follow" }
+      // Grant anyone-reader permission so Instagram's CDN can download it
+      console.log(`[IG] Granting public read on Drive file ${fileId}…`);
+      const permRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}/permissions`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${driveToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ role: "reader", type: "anyone" }),
+        }
       );
 
-      if (!driveRes.ok) {
-        const errText = await driveRes.text().catch(() => "");
-        console.error(`[IG] Drive fetch failed ${driveRes.status}: ${errText.slice(0, 200)}`);
+      if (!permRes.ok) {
+        const errText = await permRes.text().catch(() => "");
+        console.error(`[IG] Drive permission grant failed ${permRes.status}: ${errText.slice(0, 200)}`);
         return NextResponse.json(
-          { error: `Failed to fetch video from Google Drive (${driveRes.status})` },
+          { error: `Failed to make Drive file public (${permRes.status}): ${errText.slice(0, 200)}` },
           { status: 502 }
         );
       }
 
-      const videoBytes = await driveRes.arrayBuffer();
-      const contentType = driveRes.headers.get("content-type") || "video/mp4";
-      console.log(`[IG] Downloaded ${videoBytes.byteLength} bytes (${contentType})`);
+      const permData = await permRes.json();
+      drivePermissionId = permData.id as string;
+      drivePermFileId = fileId;
+      console.log(`[IG] Permission granted: ${drivePermissionId}`);
 
-      // Stage in Supabase Storage — creates a stable public CDN URL for Instagram
-      await supabase.storage.createBucket(TEMP_BUCKET, { public: true }).catch(() => {});
-      tempStorageKey = `${fileId}-${Date.now()}.mp4`;
-
-      const { error: storageErr } = await supabase.storage
-        .from(TEMP_BUCKET)
-        .upload(tempStorageKey, videoBytes, { contentType: "video/mp4", upsert: true });
-
-      if (storageErr) {
-        console.error(`[IG] Supabase Storage upload failed:`, storageErr);
-        return NextResponse.json(
-          { error: `Staging upload failed: ${storageErr.message}` },
-          { status: 502 }
-        );
-      }
-
-      const { data: urlData } = supabase.storage.from(TEMP_BUCKET).getPublicUrl(tempStorageKey);
-      igVideoUrl = urlData.publicUrl;
-      console.log(`[IG] Staged at: ${igVideoUrl}`);
+      // Use the direct Drive usercontent download URL — always fast, no proxy needed
+      igVideoUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`;
+      console.log(`[IG] Using Drive public URL: ${igVideoUrl}`);
     }
 
     // ── Create media container (standard video_url approach) ─────────────────
@@ -216,9 +208,16 @@ export async function POST(req: NextRequest) {
         .eq("id", postId);
     }
 
-    // Clean up staging file (non-blocking — don't fail the request if this errors)
-    if (tempStorageKey) {
-      supabase.storage.from(TEMP_BUCKET).remove([tempStorageKey]).catch(() => {});
+    // Revoke Drive public permission (non-blocking — don't fail the request if this errors)
+    if (drivePermFileId && drivePermissionId) {
+      const agentSupabase2 = createAgentSupabaseClient();
+      getDriveAccessToken(agentSupabase2).then((tok) => {
+        if (!tok) return;
+        fetch(
+          `https://www.googleapis.com/drive/v3/files/${drivePermFileId}/permissions/${drivePermissionId}`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${tok}` } }
+        ).catch(() => {});
+      }).catch(() => {});
     }
 
     return NextResponse.json({
@@ -229,9 +228,16 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error("[IG] Unhandled error:", msg, error);
-    // Clean up staging file on error too
-    if (tempStorageKey) {
-      supabase.storage.from(TEMP_BUCKET).remove([tempStorageKey]).catch(() => {});
+    // Revoke Drive public permission on error too (non-blocking)
+    if (drivePermFileId && drivePermissionId) {
+      const agentSupabase3 = createAgentSupabaseClient();
+      getDriveAccessToken(agentSupabase3).then((tok) => {
+        if (!tok) return;
+        fetch(
+          `https://www.googleapis.com/drive/v3/files/${drivePermFileId}/permissions/${drivePermissionId}`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${tok}` } }
+        ).catch(() => {});
+      }).catch(() => {});
     }
     return NextResponse.json({ error: `Instagram internal error: ${msg}` }, { status: 500 });
   }

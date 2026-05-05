@@ -6,6 +6,7 @@ import {
   listClipsInFolder,
 } from "@/lib/agent-utils";
 import { listDriveFiles } from "@/lib/google-drive";
+import { generateCaptions, VoiceProfile } from "@/lib/claude";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -40,11 +41,28 @@ export async function GET(req: NextRequest) {
 
   const supabase = createAgentSupabaseClient();
 
-  // ── Get Drive token ────────────────────────────────────────────────────────
-  const driveToken = await getDriveAccessToken(supabase);
+  // ── Get Drive token + voice profile in parallel ───────────────────────────
+  const [driveToken, voiceProfileRow] = await Promise.all([
+    getDriveAccessToken(supabase),
+    supabase
+      .from("voice_profile")
+      .select("podcast_name, voice_summary, tone_keywords, emoji_style, voice_examples")
+      .limit(1)
+      .maybeSingle()
+      .then((r) => r.data),
+  ]);
+
   if (!driveToken) {
     return NextResponse.json({ error: "Google Drive not connected" }, { status: 503 });
   }
+
+  const voiceProfile: VoiceProfile = {
+    podcast_name:   voiceProfileRow?.podcast_name   || "I Am Mario Areyes Podcast",
+    voice_summary:  voiceProfileRow?.voice_summary  || undefined,
+    tone_keywords:  voiceProfileRow?.tone_keywords  || undefined,
+    emoji_style:    voiceProfileRow?.emoji_style    || undefined,
+    voice_examples: voiceProfileRow?.voice_examples || undefined,
+  };
 
   // ── Find matching folders ──────────────────────────────────────────────────
   // source=ig → look inside the IG subfolder for guest subfolders
@@ -146,7 +164,16 @@ export async function GET(req: NextRequest) {
   // every guest gets equal coverage over the week.
   const n = matchedFolders.length;
   const slotsPerDay = Math.min(n, POSTING_HOURS_UTC.length); // 2
-  const postsToInsert: Record<string, unknown>[] = [];
+
+  // Collect raw post stubs first, then batch-generate captions in parallel
+  const postStubs: Array<{
+    clipTitle: string;
+    guestName: string;
+    scheduledAt: string;
+    contentUrl: string;
+    driveFileId: string;
+  }> = [];
+
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
@@ -155,31 +182,76 @@ export async function GET(req: NextRequest) {
     day.setUTCDate(today.getUTCDate() + dayOffset);
 
     for (let slot = 0; slot < slotsPerDay; slot++) {
-      // Rotate folder → slot assignment each day
       const folderIdx = (slot + dayOffset) % n;
       const deck = folderDecks[folderIdx];
 
-      if (deck.clips.length === 0) continue; // exhausted — skip
+      if (deck.clips.length === 0) continue;
 
-      const clip = deck.clips.shift()!; // take next unposted clip
+      const clip = deck.clips.shift()!;
       const scheduledAt = new Date(day);
       scheduledAt.setUTCHours(POSTING_HOURS_UTC[slot], 0, 0, 0);
 
-      postsToInsert.push({
-        title: clip.name.replace(/\.[^.]+$/, ""),
-        description: `Guest: ${deck.name}`,
-        platforms: ["instagram", "tiktok", "youtube"],
-        status: "scheduled",
-        scheduled_at: scheduledAt.toISOString(),
-        content_url: `${APP_URL}/api/drive-proxy/${clip.id}`,
-        drive_file_id: clip.id,
-        captions_json: {},
-        caption: "",
-        hashtags: [],
-        platform_post_ids: {},
+      postStubs.push({
+        clipTitle: clip.name.replace(/\.[^.]+$/, ""),
+        guestName: deck.name,
+        scheduledAt: scheduledAt.toISOString(),
+        contentUrl: `${APP_URL}/api/drive-proxy/${clip.id}`,
+        driveFileId: clip.id,
       });
     }
   }
+
+  if (postStubs.length === 0) {
+    return NextResponse.json({ error: "No posts could be built — check clip availability" }, { status: 422 });
+  }
+
+  // ── Generate AI captions in parallel (one Claude call per post) ───────────
+  // Falls back to a structured template if Claude fails for any individual post.
+  const fallbackCaptions = (title: string, guest: string) => {
+    const ig = `${title}\n\n${guest} drops knowledge on the I Am Mario Areyes Podcast. You don't want to miss this one. 🎙️\n\nFull convo → link in bio`;
+    return { instagram: ig, youtube: ig, tiktok: title };
+  };
+
+  const captionResults = await Promise.all(
+    postStubs.map(async (stub) => {
+      try {
+        const results = await generateCaptions({
+          title: stub.clipTitle,
+          description: `Guest: ${stub.guestName}`,
+          platforms: ["instagram", "youtube", "tiktok"],
+          podcastName: voiceProfile.podcast_name,
+          voiceProfile,
+        });
+        const byPlatform: Record<string, string> = {};
+        for (const r of results) byPlatform[r.platform] = r.caption;
+        return {
+          instagram: byPlatform.instagram || fallbackCaptions(stub.clipTitle, stub.guestName).instagram,
+          youtube:   byPlatform.youtube   || fallbackCaptions(stub.clipTitle, stub.guestName).youtube,
+          tiktok:    byPlatform.tiktok    || stub.clipTitle,
+        };
+      } catch {
+        return fallbackCaptions(stub.clipTitle, stub.guestName);
+      }
+    })
+  );
+
+  // ── Assemble final post rows ───────────────────────────────────────────────
+  const postsToInsert: Record<string, unknown>[] = postStubs.map((stub, i) => {
+    const caps = captionResults[i];
+    return {
+      title:           stub.clipTitle,
+      description:     `Guest: ${stub.guestName}`,
+      platforms:       ["instagram", "tiktok", "youtube"],
+      status:          "scheduled",
+      scheduled_at:    stub.scheduledAt,
+      content_url:     stub.contentUrl,
+      drive_file_id:   stub.driveFileId,
+      caption:         caps.instagram,
+      captions_json:   caps,
+      hashtags:        [],
+      platform_post_ids: {},
+    };
+  });
 
   if (postsToInsert.length === 0) {
     return NextResponse.json({ error: "No posts could be built — check clip availability" }, { status: 422 });

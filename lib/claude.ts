@@ -5,6 +5,14 @@ export const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+export interface VoiceProfile {
+  voice_summary?: string;
+  tone_keywords?: string[];
+  emoji_style?: string;
+  voice_examples?: string[];
+  podcast_name?: string;
+}
+
 export interface GenerateCaptionsParams {
   title: string;
   description: string;
@@ -12,6 +20,7 @@ export interface GenerateCaptionsParams {
   podcastName?: string;
   episode?: string;
   analyticsContext?: string;
+  voiceProfile?: VoiceProfile;
 }
 
 export interface CaptionResult {
@@ -21,8 +30,10 @@ export interface CaptionResult {
 }
 
 /**
- * Generate platform-specific captions and hashtags using Claude
- * Uses claude-opus-4-6 with streaming
+ * Generate platform-specific captions using Claude.
+ * Instagram captions follow the Reels-optimised structure:
+ *   Hook (≤55 chars) → Body (guest + bullets) → CTA
+ * Voice profile data is injected when available.
  */
 export async function generateCaptions(
   params: GenerateCaptionsParams
@@ -31,62 +42,80 @@ export async function generateCaptions(
     title,
     description,
     platforms,
-    podcastName = "Our Podcast",
+    podcastName = "I Am Mario Areyes Podcast",
     episode = "",
     analyticsContext = "",
+    voiceProfile,
   } = params;
+
+  // Build voice context block
+  const voiceLines: string[] = [];
+  if (voiceProfile?.voice_summary) voiceLines.push(`Voice summary: ${voiceProfile.voice_summary}`);
+  if (voiceProfile?.tone_keywords?.length) voiceLines.push(`Tone: ${voiceProfile.tone_keywords.join(", ")}`);
+  if (voiceProfile?.emoji_style) voiceLines.push(`Emoji style: ${voiceProfile.emoji_style}`);
+  if (voiceProfile?.voice_examples?.length) {
+    voiceLines.push(`Example captions from this creator:\n${voiceProfile.voice_examples.slice(0, 3).map((e) => `  "${e}"`).join("\n")}`);
+  }
+  const voiceContext = voiceLines.length
+    ? `\nCREATOR VOICE (match this tone exactly):\n${voiceLines.join("\n")}`
+    : "";
 
   const platformInstructions = platforms
     .map((p) => {
       if (p === "youtube") {
-        return `YouTube Shorts: Write an engaging caption (150-300 chars) that teases the content. Include a call-to-action. YouTube allows up to 15 hashtags but 3-5 targeted ones work best.`;
+        return `YOUTUBE SHORTS:
+Write a 2-3 sentence description (100-200 words). Open with a punchy hook line, then name the guest and explain what viewers will learn. End with a CTA pointing to the full episode. No hashtags in the text (added separately).`;
       } else if (p === "instagram") {
-        return `Instagram Reels: Write a compelling caption (125-150 chars visible before "more"). Can be longer (up to 2200 chars). Use emojis strategically. Instagram allows up to 30 hashtags, 10-15 is optimal.`;
+        return `INSTAGRAM REELS — follow this structure exactly (NO hashtags; they are appended automatically):
+
+LINE 1 — HOOK (hard limit: ≤55 characters, no period): The only line visible before "more." Must stop the scroll. Use a punchy statement, open loop ("He went from X to Y"), or direct pull quote. Count the characters.
+
+[blank line]
+
+BODY (2-5 lines, use line breaks between each):
+• Guest name + their authority/credential in 1 line
+• 2-3 specific insight bullets from the clip title (use — or a single relevant emoji as bullet)
+• Optional: 1 line of story setup or tension that makes them want to watch
+
+[blank line]
+
+CTA (1-2 lines): A specific, active ask. NOT "let me know what you think." Examples that work: "Drop a 🔥 if this hit you" / "Tag someone who needs this" / "Full convo → link in bio"
+
+Target total: 150-250 words. Use emojis purposefully, not decoratively.`;
       } else if (p === "tiktok") {
-        return `TikTok: Write a punchy, hook-driven caption under 150 chars. TikTok captions should be conversational and native to the platform. Use 3-5 relevant hashtags including trending ones.`;
+        return `TIKTOK:
+Write a punchy hook-driven title/caption under 120 characters. Conversational, native to TikTok. Can be a question, challenge, or bold claim. No hashtags in text (added separately).`;
       }
       return "";
     })
     .filter(Boolean)
-    .join("\n");
+    .join("\n\n");
 
-  const prompt = `You are a social media expert specializing in podcast content promotion.
+  const prompt = `You are a social media strategist for the "${podcastName}" podcast. Your job is to write captions that sound exactly like the creator — not generic podcast copy.
+${voiceContext}
 
-Podcast: "${podcastName}"
-Episode/Content: "${title}"
-Description: "${description}"
-${episode ? `Episode Number: ${episode}` : ""}
-${analyticsContext ? `Recent Performance Context: ${analyticsContext}` : ""}
+CONTENT TO CAPTION:
+Title: "${title}"
+Guest / Context: "${description}"
+${episode ? `Episode: ${episode}` : ""}
+${analyticsContext ? `Performance context: ${analyticsContext}` : ""}
 
-Generate optimized social media captions and hashtags for the following platforms:
+PLATFORM INSTRUCTIONS:
 ${platformInstructions}
 
-Return a JSON array with this exact structure:
+Return ONLY a valid JSON array — no markdown fences, no explanation:
 [
-  {
-    "platform": "youtube",
-    "caption": "...",
-    "hashtags": ["tag1", "tag2", "tag3"]
-  },
-  {
-    "platform": "instagram",
-    "caption": "...",
-    "hashtags": ["tag1", "tag2", ...]
-  },
-  {
-    "platform": "tiktok",
-    "caption": "...",
-    "hashtags": ["tag1", "tag2", "tag3"]
-  }
+  { "platform": "instagram", "caption": "...", "hashtags": [] },
+  { "platform": "youtube",   "caption": "...", "hashtags": [] },
+  { "platform": "tiktok",    "caption": "...", "hashtags": [] }
 ]
 
-Only include platforms from this list: ${platforms.join(", ")}
-
-Make each caption unique and optimized for the specific platform's algorithm and audience behavior. Focus on authenticity and engagement.`;
+Include only the platforms listed: ${platforms.join(", ")}
+Hashtags array should always be empty — they are managed separately.`;
 
   const message = await anthropic.messages.create({
     model: "claude-opus-4-5",
-    max_tokens: 2000,
+    max_tokens: 3000,
     messages: [
       {
         role: "user",
@@ -100,8 +129,9 @@ Make each caption unique and optimized for the specific platform's algorithm and
     throw new Error("Unexpected response type from Claude");
   }
 
-  // Extract JSON from response
-  const jsonMatch = content.text.match(/\[[\s\S]*\]/);
+  // Strip markdown code fences if present, then extract JSON array
+  const cleaned = content.text.replace(/```[a-z]*\n?/gi, "").trim();
+  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
     throw new Error("Could not parse JSON from Claude response");
   }
