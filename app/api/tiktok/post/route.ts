@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
           source: "PULL_FROM_URL",
           video_url: videoUrl,
         },
-        post_mode: "MEDIA_UPLOAD", // required for video.upload scope (inbox/draft); change to DIRECT_POST when video.publish is approved
+        post_mode: "DIRECT_POST", // requires video.publish scope — posts directly to TikTok feed
       }),
     });
 
