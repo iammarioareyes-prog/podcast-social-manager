@@ -17,28 +17,26 @@ export async function GET() {
   const supabase = createAgentSupabaseClient();
   const now = new Date();
 
-  // Find all scheduled/stuck posts for today (UTC)
-  const todayStart = new Date(now);
-  todayStart.setUTCHours(0, 0, 0, 0);
-  const todayEnd = new Date(now);
-  todayEnd.setUTCHours(23, 59, 59, 999);
+  // Look back up to 30 days so missed posts are never stranded.
+  const lookbackStart = new Date(now);
+  lookbackStart.setUTCDate(lookbackStart.getUTCDate() - 30);
 
-  // Reset today's failed OR stuck-publishing posts back to scheduled so they get retried.
-  // "publishing" posts can get stuck if a previous function invocation timed out before
-  // it could write the final status — treat them the same as failed.
+  // Reset ALL failed OR stuck-publishing posts within the lookback window so
+  // they get retried. "publishing" posts get stuck when a prior invocation
+  // timed out before it could write the final status.
   await supabase
     .from("posts")
     .update({ status: "scheduled", updated_at: now.toISOString() })
     .in("status", ["failed", "publishing"])
-    .gte("scheduled_at", todayStart.toISOString())
-    .lte("scheduled_at", todayEnd.toISOString());
+    .gte("scheduled_at", lookbackStart.toISOString())
+    .lte("scheduled_at", now.toISOString());
 
   const { data: posts, error } = await supabase
     .from("posts")
     .select("*")
-    .in("status", ["scheduled", "publishing"]) // pick up stuck 'publishing' too
-    .gte("scheduled_at", todayStart.toISOString())
-    .lte("scheduled_at", now.toISOString()) // only posts whose time has come
+    .in("status", ["scheduled", "publishing"])
+    .gte("scheduled_at", lookbackStart.toISOString())
+    .lte("scheduled_at", now.toISOString()) // any overdue post, not just today's
     .order("scheduled_at", { ascending: true });
 
   if (error) {
