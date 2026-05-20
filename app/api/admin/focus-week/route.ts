@@ -15,7 +15,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://iamm-podcast-mgr-v1.
 const POSTING_HOURS_UTC = [13, 18]; // 9am, 2pm EDT — matches the 2 Vercel Hobby cron slots
 
 /**
- * GET /api/admin/focus-week?guests=Mike+Williams,Camillia+Harris,Grey
+ * GET /api/admin/focus-week?guests=Hosts+episode,Carlton+Mackey,Ash+Cash
  *
  * 1. Clears ALL scheduled posts
  * 2. Finds Drive folders matching the provided guest keywords
@@ -25,7 +25,7 @@ const POSTING_HOURS_UTC = [13, 18]; // 9am, 2pm EDT — matches the 2 Vercel Hob
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const guestsParam = searchParams.get("guests") || "Mike Williams,Camillia Harris,Grey";
+  const guestsParam = searchParams.get("guests") || "Hosts episode,Carlton Mackey,Ash Cash";
   const days = Math.min(parseInt(searchParams.get("days") || "7"), 30);
   const source = (searchParams.get("source") || "root").toLowerCase(); // "ig" → use IG subfolder
   const maxDurationSec = parseInt(searchParams.get("maxDuration") || "0"); // 0 = no filter
