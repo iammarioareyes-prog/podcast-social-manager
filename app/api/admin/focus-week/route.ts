@@ -147,11 +147,14 @@ export async function GET(req: NextRequest) {
     }, { status: 422 });
   }
 
-  // ── Clear ALL scheduled posts ──────────────────────────────────────────────
+  // ── Clear ALL non-published posts ─────────────────────────────────────────
+  // Delete scheduled, failed, AND publishing — otherwise old failed posts from
+  // a previous guest lineup survive the rebuild and get resurrected by the
+  // post-now 30-day lookback reset logic.
   const { error: deleteErr } = await supabase
     .from("posts")
     .delete()
-    .eq("status", "scheduled");
+    .in("status", ["scheduled", "failed", "publishing"]);
 
   if (deleteErr) {
     return NextResponse.json({ error: `Clear failed: ${deleteErr.message}` }, { status: 500 });
