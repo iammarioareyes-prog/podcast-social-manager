@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createAgentSupabaseClient, getDriveAccessToken } from "@/lib/agent-utils";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -11,6 +12,9 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
+  let ttPermissionId: string | null = null;
+  let ttPermFileId: string | null = null;
+
   try {
     const {
       postId,
@@ -51,7 +55,7 @@ export async function POST(req: NextRequest) {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({
-            client_key: process.env.TIKTOK_CLIENT_ID!,
+            client_key: process.env.TIKTOK_CLIENT_KEY!,
             client_secret: process.env.TIKTOK_CLIENT_SECRET!,
             grant_type: "refresh_token",
             refresh_token: conn.refresh_token,
@@ -90,7 +94,46 @@ export async function POST(req: NextRequest) {
       finalTitle = `${title}\n\n${tagString}`;
     }
 
+    // ── Resolve video URL (Drive public permission) ───────────────────────────
+    // TikTok's servers pull the video via PULL_FROM_URL. They can't reach our
+    // Vercel drive-proxy (cold-start timeout). Same fix as Instagram: grant a
+    // temporary anyone/reader permission on the Drive file and pass the direct
+    // usercontent URL. Permission is revoked after the init call succeeds.
+    let ttVideoUrl = videoUrl;
+    const fileId = videoUrl.includes("/api/drive-proxy/")
+      ? videoUrl.split("/api/drive-proxy/")[1]?.split("?")[0]
+      : null;
+
+    if (fileId) {
+      const agentSupabase = createAgentSupabaseClient();
+      const driveToken = await getDriveAccessToken(agentSupabase);
+      if (driveToken) {
+        const permRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}/permissions`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${driveToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ role: "reader", type: "anyone" }),
+          }
+        );
+        if (permRes.ok) {
+          const permData = await permRes.json();
+          ttPermissionId = permData.id as string;
+          ttPermFileId = fileId;
+          ttVideoUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`;
+          console.log(`[TT] Drive public URL: ${ttVideoUrl}`);
+        } else {
+          console.warn(`[TT] Drive permission grant failed — using proxy URL`);
+        }
+      }
+    }
+
     // Step 1: Initialize the post with PULL_FROM_URL
+    // post_mode: MEDIA_UPLOAD uses video.upload scope (uploads to inbox/drafts).
+    // Switch to DIRECT_POST once video.publish scope is approved by TikTok.
     const initRes = await fetch(`${TIKTOK_API}/post/publish/video/init/`, {
       method: "POST",
       headers: {
@@ -99,7 +142,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         post_info: {
-          title: finalTitle.slice(0, 2200), // TikTok description max 2200 chars
+          title: finalTitle.slice(0, 2200),
           privacy_level: privacyLevel,
           disable_duet: disableDuet,
           disable_comment: disableComment,
@@ -107,9 +150,9 @@ export async function POST(req: NextRequest) {
         },
         source_info: {
           source: "PULL_FROM_URL",
-          video_url: videoUrl,
+          video_url: ttVideoUrl,
         },
-        post_mode: "DIRECT_POST", // requires video.publish scope — posts directly to TikTok feed
+        post_mode: "MEDIA_UPLOAD",
       }),
     });
 
@@ -184,6 +227,18 @@ export async function POST(req: NextRequest) {
         .eq("id", postId);
     }
 
+    // Revoke Drive public permission (non-blocking)
+    if (ttPermFileId && ttPermissionId) {
+      const agentSupabase2 = createAgentSupabaseClient();
+      getDriveAccessToken(agentSupabase2).then((tok) => {
+        if (!tok) return;
+        fetch(
+          `https://www.googleapis.com/drive/v3/files/${ttPermFileId}/permissions/${ttPermissionId}`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${tok}` } }
+        ).catch(() => {});
+      }).catch(() => {});
+    }
+
     return NextResponse.json({
       success: true,
       publishId,
@@ -194,6 +249,17 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("TikTok post error:", error);
+    // Revoke Drive permission on error too
+    if (ttPermFileId && ttPermissionId) {
+      const agentSupabase3 = createAgentSupabaseClient();
+      getDriveAccessToken(agentSupabase3).then((tok) => {
+        if (!tok) return;
+        fetch(
+          `https://www.googleapis.com/drive/v3/files/${ttPermFileId}/permissions/${ttPermissionId}`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${tok}` } }
+        ).catch(() => {});
+      }).catch(() => {});
+    }
     return NextResponse.json({ error: "Failed to post to TikTok" }, { status: 500 });
   }
 }
