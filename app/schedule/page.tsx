@@ -186,7 +186,7 @@ export default function SchedulePage() {
   const handleRebuildSchedule = async () => {
     setIsRebuildingSchedule(true);
     try {
-      const res = await fetch("/api/admin/focus-week?guests=Camillia,Charles,Jessica");
+      const res = await fetch("/api/admin/focus-week?guests=Ash+Cash,Shivy,Carlton");
       const data = await res.json();
       if (!res.ok) {
         showToast(data.error || "Failed to rebuild schedule", "error");
