@@ -6,10 +6,11 @@ export default function PrivacyPage() {
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 800, margin: "0 auto", padding: "48px 24px", color: "#1a1a1a", lineHeight: 1.7 }}>
       <h1 style={{ fontSize: 32, fontWeight: 700, marginBottom: 8 }}>Privacy Policy</h1>
-      <p style={{ color: "#666", marginBottom: 40 }}>Last updated: April 23, 2026</p>
+      <p style={{ fontSize: 18, fontWeight: 600, color: "#444", marginBottom: 4 }}>I Am Mario Areyes Podcast Social Media Manager</p>
+      <p style={{ color: "#666", marginBottom: 40 }}>Last updated: September 3, 2026</p>
 
       <h2 style={{ fontSize: 20, fontWeight: 600, marginTop: 32 }}>1. Overview</h2>
-      <p>This Privacy Policy describes how the I Am Mario Areyes Podcast Social Media Manager ("the App") collects, uses, and protects information when you connect your social media accounts and use the publishing features of the App.</p>
+      <p>This Privacy Policy describes how <strong>I Am Mario Areyes Podcast Social Media Manager</strong> ("the App") collects, uses, and protects information when you connect your social media accounts and use the publishing features of the App. The App is operated by Mario Areyes (iammarioareyes@gmail.com).</p>
 
       <h2 style={{ fontSize: 20, fontWeight: 600, marginTop: 32 }}>2. Information We Collect</h2>
       <p>The App collects the following categories of information:</p>

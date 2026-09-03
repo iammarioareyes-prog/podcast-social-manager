@@ -6,10 +6,11 @@ export default function TermsPage() {
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 800, margin: "0 auto", padding: "48px 24px", color: "#1a1a1a", lineHeight: 1.7 }}>
       <h1 style={{ fontSize: 32, fontWeight: 700, marginBottom: 8 }}>Terms of Service</h1>
-      <p style={{ color: "#666", marginBottom: 40 }}>Last updated: April 23, 2026</p>
+      <p style={{ fontSize: 18, fontWeight: 600, color: "#444", marginBottom: 4 }}>I Am Mario Areyes Podcast Social Media Manager</p>
+      <p style={{ color: "#666", marginBottom: 40 }}>Last updated: September 3, 2026</p>
 
       <h2 style={{ fontSize: 20, fontWeight: 600, marginTop: 32 }}>1. Acceptance of Terms</h2>
-      <p>By accessing or using the I Am Mario Areyes Podcast Social Media Manager ("the App"), you agree to be bound by these Terms of Service. If you do not agree, do not use the App.</p>
+      <p>By accessing or using <strong>I Am Mario Areyes Podcast Social Media Manager</strong> ("the App"), you agree to be bound by these Terms of Service. If you do not agree, do not use the App. The App is operated by Mario Areyes (iammarioareyes@gmail.com).</p>
 
       <h2 style={{ fontSize: 20, fontWeight: 600, marginTop: 32 }}>2. Description of Service</h2>
       <p>The App is a private social media management tool that enables the podcast operator to schedule and publish video content to connected social media platforms including Instagram, TikTok, and YouTube. The App connects to Google Drive to source content and uses AI to generate captions.</p>
