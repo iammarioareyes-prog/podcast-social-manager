@@ -8,15 +8,20 @@ const PUBLIC_PATHS = [
   "/signup",
   "/privacy",
   "/terms",
+  // Supabase auth callback
   "/api/auth/callback",
+  // OAuth initiation + callbacks (browser redirects, no session cookie yet)
   "/api/auth/youtube",
-  "/api/auth/youtube/callback",
   "/api/auth/google-drive",
-  "/api/auth/google-drive/callback",
   "/api/auth/instagram",
-  "/api/auth/instagram/callback",
   "/api/auth/tiktok",
-  "/api/auth/tiktok/callback",
+  // Admin/cron routes use CRON_SECRET, not user sessions
+  "/api/admin",
+  // Cron endpoint
+  "/api/admin/post-now",
+  "/api/admin/focus-week",
+  "/api/admin/clear-schedule",
+  "/api/admin/post-audit",
 ];
 
 function isPublic(pathname: string) {
