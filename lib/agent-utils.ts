@@ -17,10 +17,11 @@ type SupabaseClient = ReturnType<typeof createAgentSupabaseClient>;
 // ─────────────────────────────────────────────────────────────
 // Google Drive token (with auto-refresh)
 // ─────────────────────────────────────────────────────────────
-export async function getDriveAccessToken(supabase: SupabaseClient): Promise<string | null> {
+// Returns the Drive access token AND the owner's user_id
+export async function getDriveConnection(supabase: SupabaseClient): Promise<{ accessToken: string; userId: string | null } | null> {
   const { data: conn } = await supabase
     .from("platform_connections")
-    .select("access_token, refresh_token, token_expires_at")
+    .select("access_token, refresh_token, token_expires_at, user_id")
     .eq("platform", "google_drive")
     .order("created_at", { ascending: false })
     .limit(1)
@@ -52,13 +53,18 @@ export async function getDriveAccessToken(supabase: SupabaseClient): Promise<str
           token_expires_at: new Date(Date.now() + (refreshed.expires_in ?? 3600) * 1000).toISOString(),
         })
         .eq("platform", "google_drive");
-      return refreshed.access_token;
+      return { accessToken: refreshed.access_token, userId: conn.user_id ?? null };
     }
-    return null;
   }
 
-  return conn.access_token;
+  return { accessToken: conn.access_token, userId: conn.user_id ?? null };
 }
+
+export async function getDriveAccessToken(supabase: SupabaseClient): Promise<string | null> {
+  const result = await getDriveConnection(supabase);
+  return result?.accessToken ?? null;
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // Drive folder helpers

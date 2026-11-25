@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createSSRSupabaseClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get("code");
   const error = searchParams.get("error");
@@ -20,6 +17,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Get the authenticated user from their session cookie
+    const ssrClient = createSSRSupabaseClient();
+    const { data: { user } } = await ssrClient.auth.getUser();
+    if (!user) {
+      return NextResponse.redirect(`${appUrl}/login?next=/settings`);
+    }
+
+    // Service role client for DB writes
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
     const appId = process.env.INSTAGRAM_APP_ID!;
     const appSecret = process.env.INSTAGRAM_APP_SECRET!;
     const redirectUri = process.env.INSTAGRAM_REDIRECT_URI!;
@@ -50,7 +60,7 @@ export async function GET(request: NextRequest) {
     );
     const longTokenData = await longTokenRes.json();
     const accessToken = longTokenData.access_token || shortLivedToken;
-    const expiresIn = longTokenData.expires_in || 5183944; // ~60 days
+    const expiresIn = longTokenData.expires_in || 5183944;
 
     // Step 3: Get Facebook Pages to find Instagram Business Account
     const pagesRes = await fetch(
@@ -59,7 +69,6 @@ export async function GET(request: NextRequest) {
     const pagesData = await pagesRes.json();
     const pages = pagesData.data || [];
 
-    // Collect ALL Instagram accounts across all pages
     const igAccounts: { accountId: string; username: string; pageAccessToken: string }[] = [];
     for (const page of pages) {
       const igRes = await fetch(
@@ -84,35 +93,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${appUrl}/settings?error=instagram_no_business_account`);
     }
 
-    // Prefer the configured username (INSTAGRAM_PREFERRED_USERNAME), otherwise use first found
     const preferredUsername = process.env.INSTAGRAM_PREFERRED_USERNAME?.toLowerCase();
     const chosen = (preferredUsername
       ? igAccounts.find((a) => a.username.toLowerCase() === preferredUsername)
       : null) ?? igAccounts[0];
 
-    const instagramAccountId = chosen.accountId;
-    const instagramUsername = chosen.username;
-    const pageAccessToken = chosen.pageAccessToken;
-
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-    // Save to platform_connections
     await supabase.from("platform_connections").upsert(
       {
+        user_id: user.id,
         platform: "instagram",
-        access_token: pageAccessToken,
+        access_token: chosen.pageAccessToken,
         refresh_token: null,
         token_expires_at: expiresAt,
-        platform_user_id: instagramAccountId,
-        platform_username: instagramUsername,
+        platform_user_id: chosen.accountId,
+        platform_username: chosen.username,
         is_connected: true,
         metadata: {
-          instagram_account_id: instagramAccountId,
-          username: instagramUsername,
+          instagram_account_id: chosen.accountId,
+          username: chosen.username,
         },
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "platform" }
+      { onConflict: "user_id,platform" }
     );
 
     return NextResponse.redirect(`${appUrl}/settings?success=instagram_connected`);

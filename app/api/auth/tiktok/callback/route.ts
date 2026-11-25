@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createSSRSupabaseClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get("code");
   const error = searchParams.get("error");
@@ -19,6 +16,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Get the authenticated user from their session cookie
+    const ssrClient = createSSRSupabaseClient();
+    const { data: { user } } = await ssrClient.auth.getUser();
+    if (!user) {
+      return NextResponse.redirect(`${appUrl}/login?next=/settings`);
+    }
+
+    // Service role client for DB writes
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
     const clientKey = process.env.TIKTOK_CLIENT_KEY!;
     const clientSecret = process.env.TIKTOK_CLIENT_SECRET!;
     const redirectUri = process.env.TIKTOK_REDIRECT_URI!;
@@ -57,9 +67,9 @@ export async function GET(request: NextRequest) {
 
     const expiresAt = new Date(Date.now() + expires_in * 1000).toISOString();
 
-    // Upsert into platform_connections
     await supabase.from("platform_connections").upsert(
       {
+        user_id: user.id,
         platform: "tiktok",
         access_token,
         refresh_token,
@@ -69,7 +79,7 @@ export async function GET(request: NextRequest) {
         is_connected: true,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "platform" }
+      { onConflict: "user_id,platform" }
     );
 
     return NextResponse.redirect(`${appUrl}/settings?success=tiktok_connected`);

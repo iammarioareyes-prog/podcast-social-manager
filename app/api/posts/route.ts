@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase";
+import { createServerSupabaseClient, createSSRSupabaseClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/posts - Get all posts
+// GET /api/posts - Get all posts for the authenticated user
 export async function GET(req: NextRequest) {
   try {
+    const ssrClient = createSSRSupabaseClient();
+    const { data: { user } } = await ssrClient.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const supabase = createServerSupabaseClient();
     const { searchParams } = new URL(req.url);
 
@@ -17,6 +23,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from("posts")
       .select("*")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -57,6 +64,12 @@ export async function GET(req: NextRequest) {
 // POST /api/posts - Create a new post
 export async function POST(req: NextRequest) {
   try {
+    const ssrClient = createSSRSupabaseClient();
+    const { data: { user } } = await ssrClient.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       title,
@@ -83,6 +96,7 @@ export async function POST(req: NextRequest) {
     const { data, error } = await supabase
       .from("posts")
       .insert({
+        user_id: user.id,
         title,
         description,
         caption,

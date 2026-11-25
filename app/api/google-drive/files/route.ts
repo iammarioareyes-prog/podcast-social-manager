@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createSSRSupabaseClient } from "@/lib/supabase";
 import { listDriveFiles } from "@/lib/google-drive";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const ssrClient = createSSRSupabaseClient();
+  const { data: { user } } = await ssrClient.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized", files: [] }, { status: 401 });
+  }
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -17,11 +24,12 @@ export async function GET(req: NextRequest) {
     const pageSize = parseInt(searchParams.get("pageSize") || "50");
     const pageToken = searchParams.get("pageToken") || undefined;
 
-    // Get stored access token from Supabase
+    // Get stored access token from Supabase, scoped to this user
     const { data: connection } = await supabase
       .from("platform_connections")
       .select("access_token, refresh_token, token_expires_at, is_connected")
       .eq("platform", "google_drive")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -58,7 +66,8 @@ export async function GET(req: NextRequest) {
         await supabase
           .from("platform_connections")
           .update({ is_connected: false })
-          .eq("platform", "google_drive");
+          .eq("platform", "google_drive")
+          .eq("user_id", user.id);
 
         return NextResponse.json(
           {
@@ -79,7 +88,8 @@ export async function GET(req: NextRequest) {
             Date.now() + (refreshed.expires_in ?? 3600) * 1000
           ).toISOString(),
         })
-        .eq("platform", "google_drive");
+        .eq("platform", "google_drive")
+        .eq("user_id", user.id);
     }
 
     const result = await listDriveFiles({

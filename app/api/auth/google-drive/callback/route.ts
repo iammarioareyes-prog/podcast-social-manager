@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createSSRSupabaseClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const error = searchParams.get("error");
@@ -18,6 +15,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Get the authenticated user from their session cookie
+    const ssrClient = createSSRSupabaseClient();
+    const { data: { user } } = await ssrClient.auth.getUser();
+    if (!user) {
+      return NextResponse.redirect(`${appUrl}/login?next=/settings`);
+    }
+
+    // Service role client for DB writes
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -44,16 +54,9 @@ export async function GET(request: NextRequest) {
     });
     const userInfo = await userRes.json();
 
-    // Try update first; if no row exists yet, insert
-    const { data: existing } = await supabase
-      .from("platform_connections")
-      .select("id")
-      .eq("platform", "google_drive")
-      .limit(1)
-      .maybeSingle();
-
     const payload = {
-      platform: "google_drive",
+      user_id: user.id,
+      platform: "google_drive" as const,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
@@ -67,17 +70,25 @@ export async function GET(request: NextRequest) {
       },
     };
 
-    if (existing?.id) {
-      const { error: updateErr } = await supabase
+    // Try user-scoped upsert (after migration 004 runs)
+    const { error: upsertErr } = await supabase
+      .from("platform_connections")
+      .upsert(payload, { onConflict: "user_id,platform" });
+
+    if (upsertErr) {
+      // Pre-migration fallback: update by platform only
+      const { data: existing } = await supabase
         .from("platform_connections")
-        .update(payload)
-        .eq("id", existing.id);
-      if (updateErr) console.error("Drive connection update error:", updateErr);
-    } else {
-      const { error: insertErr } = await supabase
-        .from("platform_connections")
-        .insert(payload);
-      if (insertErr) console.error("Drive connection insert error:", insertErr);
+        .select("id")
+        .eq("platform", "google_drive")
+        .limit(1)
+        .maybeSingle();
+
+      if (existing?.id) {
+        await supabase.from("platform_connections").update(payload).eq("id", existing.id);
+      } else {
+        await supabase.from("platform_connections").insert(payload);
+      }
     }
 
     return NextResponse.redirect(`${appUrl}/settings?success=drive_connected`);

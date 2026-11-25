@@ -1,4 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
 // Client-side Supabase client (lazy - avoids build-time initialization error when env vars not set)
 export function getSupabaseClient() {
@@ -15,7 +17,7 @@ export const supabase = new Proxy({} as ReturnType<typeof getSupabaseClient>, {
   },
 });
 
-// Server-side Supabase client (uses service role key - for API routes only)
+// Server-side Supabase client (uses service role key - for admin/cron API routes only)
 export function createServerSupabaseClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,6 +26,31 @@ export function createServerSupabaseClient() {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
+      },
+    }
+  );
+}
+
+// SSR Supabase client (uses anon key + session cookies - for user-scoped API routes)
+export function createSSRSupabaseClient() {
+  const cookieStore = cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Can't set cookies in read-only context (e.g., during rendering)
+          }
+        },
       },
     }
   );

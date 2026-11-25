@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createSSRSupabaseClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const error = searchParams.get("error");
@@ -18,6 +15,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Get the authenticated user from their session cookie
+    const ssrClient = createSSRSupabaseClient();
+    const { data: { user } } = await ssrClient.auth.getUser();
+    if (!user) {
+      return NextResponse.redirect(`${appUrl}/login?next=/settings`);
+    }
+
+    // Service role client for DB writes
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
     // Exchange code for tokens
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
@@ -46,9 +56,10 @@ export async function GET(request: NextRequest) {
     const channelData = await channelRes.json();
     const channel = channelData.items?.[0];
 
-    // Store tokens in Supabase
+    // Store tokens in Supabase, scoped to this user
     await supabase.from("platform_connections").upsert(
       {
+        user_id: user.id,
         platform: "youtube",
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
@@ -62,7 +73,7 @@ export async function GET(request: NextRequest) {
           thumbnail_url: channel?.snippet?.thumbnails?.default?.url,
         },
       },
-      { onConflict: "platform" }
+      { onConflict: "user_id,platform" }
     );
 
     return NextResponse.redirect(`${appUrl}/settings?success=youtube_connected`);

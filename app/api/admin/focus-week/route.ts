@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   createAgentSupabaseClient,
+  getDriveConnection,
   getDriveAccessToken,
   listGuestSubfolders,
   listClipsInFolder,
@@ -41,9 +42,9 @@ export async function GET(req: NextRequest) {
 
   const supabase = createAgentSupabaseClient();
 
-  // ── Get Drive token + voice profile in parallel ───────────────────────────
-  const [driveToken, voiceProfileRow] = await Promise.all([
-    getDriveAccessToken(supabase),
+  // ── Get Drive token + user_id + voice profile in parallel ───────────────────
+  const [driveConn, voiceProfileRow] = await Promise.all([
+    getDriveConnection(supabase),
     supabase
       .from("voice_profile")
       .select("podcast_name, voice_summary, tone_keywords, emoji_style, voice_examples")
@@ -52,9 +53,12 @@ export async function GET(req: NextRequest) {
       .then((r) => r.data),
   ]);
 
-  if (!driveToken) {
+  if (!driveConn) {
     return NextResponse.json({ error: "Google Drive not connected" }, { status: 503 });
   }
+
+  const driveToken = driveConn.accessToken;
+  const ownerUserId = driveConn.userId;
 
   const voiceProfile: VoiceProfile = {
     podcast_name:   voiceProfileRow?.podcast_name   || "I Am Mario Areyes Podcast",
@@ -242,6 +246,7 @@ export async function GET(req: NextRequest) {
   const postsToInsert: Record<string, unknown>[] = postStubs.map((stub, i) => {
     const caps = captionResults[i];
     return {
+      ...(ownerUserId ? { user_id: ownerUserId } : {}),
       title:           stub.clipTitle,
       description:     `Guest: ${stub.guestName}`,
       platforms:       ["instagram", "tiktok", "youtube"],
